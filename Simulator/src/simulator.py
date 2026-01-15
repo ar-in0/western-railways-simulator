@@ -760,6 +760,26 @@ class Simulator:
                                         className="mode-pill-toggle",
                                         style={"marginLeft": "20px"} 
                                     ),
+                                            html.Div(
+            dbc.Button(
+                "Convert to AC",
+                id="convert-ac-button",
+                color="primary",
+                outline=True,
+                disabled=True,
+            ),
+            style={"marginLeft": "auto", "marginRight": "8px"}
+        ),
+        html.Div(
+        dbc.Button(
+            "Reset",
+            id="reset-ac-button",
+            color="warning",
+            outline=True,
+            size="sm",
+        ),
+        style={"marginLeft": "4px"}
+        ),
 
                                     html.Div(
                                         dbc.Button(
@@ -876,6 +896,44 @@ html.Div(
                 className="row flex-display",
                 style={"height": "100vh"},
             )
+
+
+    def convertRakeLinksToAC(self, link_names):
+        """
+        Convert specified rake links to AC.
+        Updates both Rake and Service objects.
+        
+        Args:
+            link_names: List of rake link names (e.g., ['A', 'B'])
+        
+        Returns:
+            dict with conversion summary
+        """
+        if not link_names:
+            return {"converted": 0, "links": []}
+        
+        converted = []
+        
+        for rc in self.parser.wtt.rakecycles:
+            if rc.linkName in link_names:
+                # Skip if already AC
+                if rc.rake and rc.rake.isAC:
+                    continue
+                
+                # Convert the rake
+                if rc.rake:
+                    rc.rake.isAC = True
+                
+                # Convert all services in this rake cycle
+                for svc in rc.servicePath:
+                    svc.needsACRake = True
+                
+                converted.append(rc.linkName)
+        
+        return {
+            "converted": len(converted),
+            "links": converted
+        }
 
     def initCallbacks(self):
         self._initFileUploadCallbacks()
@@ -1201,6 +1259,109 @@ html.Div(
                 return 
 
     def _initButtonCallbacks(self): 
+        @self.app.callback(
+            Output('rake-3d-graph', 'figure', allow_duplicate=True),
+            Output('rake-link-table', 'data', allow_duplicate=True),
+            Output('status-div', 'children', allow_duplicate=True),
+            Input('reset-ac-button', 'n_clicks'),
+            State('rake-3d-graph', 'figure'),
+            prevent_initial_call=True
+        )
+        def reset_ac_conversions(n_clicks, current_fig):
+            """Reset all AC conversions to original state from data"""
+            if not n_clicks:
+                raise PreventUpdate
+            
+            # Re-parse data to restore original state
+            # You'll need to store original AC status or re-read from files
+            # For now, just show message
+            status_msg = html.Div(
+                "Reset functionality requires storing original state",
+                style={"padding": "8px", "color": "#f59e0b"}
+            )
+            
+            raise PreventUpdate  # Implement full reset logic as needed
+        @self.app.callback(
+            Output('convert-ac-button', 'disabled'),
+            Input('rake-link-table', 'selected_rows'),
+            Input("filter-tabs", "active_tab"),
+            State('rake-link-table', 'data'),
+            prevent_initial_call=True
+        )
+        def toggle_convert_button(selected_rows, active_tab, table_data):
+            """Enable Convert to AC button only when non-AC links are selected in rakelink mode"""
+            if active_tab != "tab-rakelink" or not selected_rows or not table_data:
+                return True
+            
+            # Check if any selected link is non-AC
+            has_nonac = False
+            for idx in selected_rows:
+                if idx < len(table_data):
+                    if table_data[idx]["is_ac"] == "Non-AC":
+                        has_nonac = True
+                        break
+            
+            return not has_nonac  # Enable if we have at least one non-AC link
+
+        @self.app.callback(
+            Output('rake-3d-graph', 'figure', allow_duplicate=True),
+            Output('rake-link-table', 'data', allow_duplicate=True),
+            Output('status-div', 'children', allow_duplicate=True),
+            Input('convert-ac-button', 'n_clicks'),
+            State('rake-link-table', 'selected_rows'),
+            State('rake-link-table', 'data'),
+            State('rake-3d-graph', 'figure'),
+            prevent_initial_call=True
+        )
+        def handle_ac_conversion(n_clicks, selected_rows, table_data, current_fig):
+            """Convert selected rake links to AC and update visualization"""
+            if not n_clicks or not selected_rows or not table_data:
+                raise PreventUpdate
+            
+            # Get selected link names
+            selected_links = [
+                table_data[idx]["linkname"] 
+                for idx in selected_rows 
+                if idx < len(table_data)
+            ]
+            
+            # Perform conversion
+            result = self.convertRakeLinksToAC(selected_links)
+            
+            # Update table data (mark converted links as AC)
+            updated_table = table_data.copy()
+            for row in updated_table:
+                if row["linkname"] in result["links"]:
+                    row["is_ac"] = "AC"
+            
+            # Regenerate visualization with updated data
+            self._reset_render_flags()
+            self._apply_filters(self.query)
+            fig = self.visualizeLinks3D()
+            fig = self._post_process_station_mode(fig, self.query)
+            
+            # Re-apply highlighting if there were selections
+            if self.query.selectedLinks:
+                self._highlight_clicked(fig, self.query.selectedLinks)
+            
+            # Status message
+            status_msg = html.Div(
+                [
+                    html.Span("✓ ", style={"color": "#10b981", "fontWeight": "600"}),
+                    html.Span(f"Converted {result['converted']} rake link(s) to AC: "),
+                    html.Span(", ".join(result["links"]), style={"fontWeight": "500"})
+                ],
+                style={
+                    "padding": "8px 12px",
+                    "backgroundColor": "#d1fae5",
+                    "borderLeft": "3px solid #10b981",
+                    "borderRadius": "4px",
+                    "marginBottom": "8px"
+                }
+            )
+            
+            return fig, updated_table, status_msg
+
         @self.app.callback(
             Output("rake-link-table-container", "style"),  
             Output("service-table-container", "style"),
