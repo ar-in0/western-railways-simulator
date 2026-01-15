@@ -156,7 +156,7 @@ h5 {
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s ease;
-  background-color: #2a6fd3;
+  background-color: #0d6efd;
   color: white;
 }
 
@@ -165,4 +165,22 @@ h5 {
   font-size: 14px;
   font-family: "Open Sans", sans-serif;
   padding: 0px 35px 0px 35px;  /* Changed from 4px to 12px bottom padding */
+}
+
+
+.mode-pill-toggle .btn {
+  /* border-radius: 5px !important; */
+  padding: 4px 34px;
+}
+
+.mode-pill-toggle .btn.active {
+  background-color: #0d6efd !important;   /* Bootstrap primary */
+  color: white !important;
+  border-color: #0d6efd !important;
+}
+
+.mode-pill-toggle .btn:not(.active) {
+  background-color: white !important;
+  color: #0d6efd !important;
+  border-color: #0d6efd !important;
 }

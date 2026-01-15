@@ -13,6 +13,9 @@ from typing import List, Optional, Tuple
 from timetable import Direction
 import time
 import utils
+from dash import dash_table
+from dash.exceptions import PreventUpdate
+
 
 from enum import Enum
 
@@ -31,6 +34,28 @@ class FilterQuery:
     inDirection: Optional[Direction] = None  # e.g. 'UP', 'DOWN', None
     inTimePeriod: Optional[Tuple[int, int]] = (165, 1605) # e.g. (5, 12)
     ac: Optional[bool] = None  # true, false
+    selectedLinks: List[str] = field(default_factory=list)
+    selectedServices: List[str] = field(default_factory=list)
+
+def visualization_layout(graph_ready):
+    return dcc.Graph(
+        id="rake-3d-graph",
+        style={
+            "height": "75vh",
+            "display": "block" if graph_ready else "none"
+        }
+    )
+
+def service_details_layout():
+    return html.Div("...", style={"padding": "20px"})
+
+def fmt_time(t):
+    if t is None:
+        return "--:--"
+
+    t = int(round(t))   # or int(t) if you prefer floor
+    return f"{t//60:02d}:{t%60:02d}"
+
 
 class Simulator:
     def __init__(self):
@@ -38,6 +63,8 @@ class Simulator:
         self.parser = None
         self.wttContents = None
         self.summaryContents = None
+        self.wttFileName = None
+        self.summaryFileName = None
 
         # set initial layout
         self.app.layout = self.drawLayout()
@@ -46,11 +73,357 @@ class Simulator:
 
         self.query = FilterQuery()
         self.query.type = FilterType.RAKELINK
+
+    def build_query_info_panel(self):
+        if self.query.type == FilterType.RAKELINK:
+            return self.build_rake_link_query_info()
+        elif self.query.type == FilterType.SERVICE:
+            return self.build_service_query_info()
+        else:
+            return html.Div("No query context available.")
+    
+    def build_service_query_info(self):
+        if not self.query.selectedServices:
+            return html.Div("No services selected.")
+        
+        # Find selected service objects
+        selected_svcs = [
+            svc for svc in self.parser.wtt.suburbanServices
+            if any(str(sid) in self.query.selectedServices for sid in svc.serviceId)
+        ]
+        
+        return html.Div(
+            [
+                html.Div(
+                    "Selected Services",
+                    style={
+                        "fontSize": "13px",
+                        "fontWeight": "600",
+                        "color": "#475569",
+                        "marginBottom": "6px"
+                    }
+                ),
+                *[self.build_service_detail_block(svc) for svc in selected_svcs]
+            ],
+            style={"padding": "8px"}
+        )
+
+    def build_service_detail_block(self, svc):
+        svc_id_str = ','.join(str(sid) for sid in svc.serviceId)
+        
+        return html.Div(
+            [
+                html.Div(
+                    f"Service {svc_id_str}",
+                    style={"fontWeight": "600", "marginBottom": "4px"}
+                ),
+                html.Div(
+                    f"{svc.direction.name} | {svc.initStation.name} → {svc.finalStation.name}",
+                    style={"fontSize": "12px", "color": "#64748b"}
+                ),
+                html.Div(
+                    f"{'AC' if svc.needsACRake else 'Non-AC'} | {svc.rakeSizeReq}-car | {len(svc.events)} stops",
+                    style={"fontSize": "12px", "color": "#64748b", "marginBottom": "8px"}
+                ),
+                html.Hr(style={"margin": "8px 0"})
+            ]
+        )
+
+    def build_rake_link_query_info(self):
+        if not self.query.selectedLinks:
+            return html.Div("No rake links selected.")
+
+        selected_rcs = [
+            rc for rc in self.parser.wtt.rakecycles
+            if rc.linkName in self.query.selectedLinks
+        ]
+
+        return html.Div(
+            [
+                html.Div(
+                    "Selected Rake Links",
+                    style={
+                        "fontSize": "13px",
+                        "fontWeight": "600",
+                        "color": "#475569",
+                        "marginBottom": "6px"
+                    }
+                ),
+                *[self.build_rake_path_block(rc) for rc in selected_rcs]
+            ],
+            style={"padding": "8px"}
+        )
+
+    def build_rake_path_block(self, rc):
+        services = rc.servicePath
+        n = len(services)
+
+        start = services[0].initStation.name
+        end = services[-1].finalStation.name
+
+        ac = sum(1 for s in services if s.needsACRake)
+
+        return html.Details(
+            [
+                html.Summary(
+                    [
+                        html.Span(
+                            f"Rake {rc.linkName}",
+                            style={"fontWeight": "600"}
+                        ),
+                        html.Span(
+                            f"  · {len(services)} services ·  ",
+                            style={"color": "#64748b"}
+                        ),
+                        html.Span(
+                            f"{start} → {end}"
+                        ),
+                        html.Span(
+                            f"  {'AC' if ac == len(services) else 'Non-AC' if ac == 0 else 'Mixed AC'}",
+                            style={"marginLeft": "6px", "color": "#475569"}
+                        ),
+                    ],
+                    style={
+                        "cursor": "pointer",
+                        "fontSize": "13px",
+                        "lineHeight": "1.4"
+                    }
+                ),
+
+                html.Div(
+                    [self.build_service_row(svc, i < n - 1)
+                    for i, svc in enumerate(services)],
+                    style={"marginLeft": "14px", "marginTop": "6px"}
+                )
+            ]
+        )
+
+
+
+    def build_minimal_rake_block(self, rc):
+        rows = []
+        for i, svc in enumerate(rc.servicePath, start=1):
+            rows.append({
+                "seq": i,
+                "service_id": ", ".join(str(s) for s in svc.serviceId),
+                "start": svc.initStation.name,
+                "end": svc.finalStation.name,
+                "ac": "AC" if svc.needsACRake else "Non-AC",
+            })
+
+        return html.Div(
+            [
+                html.Div(
+                    f"Rake {rc.linkName} | "
+                    f"{'AC' if rc.rake.isAC else 'Non-AC'} | "
+                    f"{rc.rake.rakeSize} cars | "
+                    f"{rc.lengthKm:.1f} km | "
+                    f"{len(rc.servicePath)} services",
+                    style={"fontWeight": "600", "marginBottom": "4px"}
+                ),
+
+                dash_table.DataTable(
+                    columns=[
+                        {"name": "#", "id": "seq"},
+                        {"name": "Service ID", "id": "service_id"},
+                        {"name": "From", "id": "start"},
+                        {"name": "To", "id": "end"},
+                        {"name": "AC?", "id": "ac"},
+                    ],
+                    data=rows,
+                    page_size=8,
+                    style_table={"maxHeight": "200px", "overflowY": "auto"},
+                    style_cell={"fontSize": "12px", "padding": "4px"},
+                ),
+
+                html.Hr()
+            ]
+        )
+
+    def build_service_row(self, svc, draw_connector):
+        row = html.Div(
+            [
+                html.Span(
+                    str(svc.serviceId),
+                    style={"minWidth": "56px", "display": "inline-block"}
+                ),
+                html.Span(
+                    f"{svc.initStation.name} → {svc.finalStation.name} ({svc.direction})",
+                    style={"marginLeft": "6px"}
+                ),
+                html.Span(
+                    fmt_time(
+                        next((e.atTime for e in svc.events if e.atTime is not None), None)
+                    ),
+                    style={"marginLeft": "6px", "color": "#64748b"}
+                ),
+            ],
+            style={"fontSize": "12px"}
+        )
+
+        if not draw_connector:
+            return row
+
+        return html.Div([row, html.Div("│", style={"marginLeft": "6px"})])
+
+
+    def _reset_render_flags(self):
+        for rc in self.parser.wtt.rakecycles:
+            rc.render = True
+
+        for svc in self.parser.wtt.suburbanServices:
+            if not svc.events:
+                svc.render = False
+                continue
+            svc.render = True
+            for ev in svc.events:
+                ev.render = True
+
+    def _apply_filters(self, qq):
+        if qq.type == FilterType.SERVICE:
+            self.applyServiceFilters(qq)
+        elif qq.type == FilterType.STATION:
+            self.applyStationFilters(qq)
+        else:
+            self.applyLinkFilters(qq)
+
+    def _post_process_station_mode(self, fig, qq):
+        if qq.type != FilterType.STATION:
+            return fig
+
+        fig.update_layout(
+            scene_camera=dict(eye=dict(x=0, y=0, z=1.5)),
+            scene=dict(aspectratio=dict(x=3, y=1.5, z=1.2))
+        )
+
+        for i, rc in enumerate(self.parser.wtt.rakecycles):
+            for svc in rc.servicePath:
+                if i < len(self.parser.wtt.rakecycles)/2 + 10:
+                    svc.needsACRake = True
+
+        before = utils.corridorMixingMinimal(qq.startStation, qq.endStation, qq.inTimePeriod[0], qq.inTimePeriod[1])
+        after = utils.corridorMixingMinimal(qq.startStation, qq.endStation, qq.inTimePeriod[0], qq.inTimePeriod[1])
+
+        print("=== Mixing Report ===")
+        for b, a in zip(before, after):
+            print(f"{b['station']}: {b['mixing_score']:.3f} -> {a['mixing_score']:.3f}")
+
+        return fig
+    
+    def _reset_isolation(self, fig):
+        for rc in self.parser.wtt.rakecycles:
+            rc.render = True
+        fig.update_layout(annotations=[])
+        for tr in fig.data:
+            tr.opacity = 1.0
+            if hasattr(tr, "line"): tr.line.width = 2
+            if hasattr(tr, "marker"): tr.marker.size = 2
+        return fig
+
+    def _highlight_clicked_services(self, fig, selected_services):
+        """
+        Highlight selected services in the visualization.
+        
+        Args:
+            fig: Plotly figure object
+            selected_services: List of service ID strings (e.g., ["93001", "93002"])
+        """
+        if not selected_services:
+            return
+        
+        selected_set = set(selected_services)
+        
+        for trace in fig.data:
+            # Trace names in service mode are "LinkName-ServiceID"
+            # e.g., "A-93001"
+            if '-' in trace.name:
+                trace_service = trace.name.split('-')[1]  # Extract service ID
+                
+                if trace_service in selected_set:
+                    # Highlight
+                    trace.opacity = 1.0
+                    if hasattr(trace, "marker"): 
+                        trace.marker.size = 3
+                else:
+                    # Dim
+                    trace.opacity = 0.35
+                    if hasattr(trace, "marker"): 
+                        trace.marker.size = 1
+            else:
+                # Not a service trace (maybe context traces), dim by default
+                trace.opacity = 0.35
+    
+    def _highlight_clicked(self, fig, selected_links):
+        """
+        Highlight one or more rake links in the visualization.
+        
+        Args:
+            fig: Plotly figure object
+            selected_links: Either a string (single link) or list of strings (multiple links)
+        """
+        # Normalize to list for uniform handling
+        if isinstance(selected_links, str):
+            selected_links = [selected_links]
+        
+        if not selected_links:
+            # # No selection - reset all to normal
+            # for trace in fig.data:
+            #     trace.opacity = 1.0
+            #     if hasattr(trace, "line"): 
+            #         trace.line.width = 2
+            #     if hasattr(trace, "marker"): 
+            #         trace.marker.size = 2
+            return
+        
+        selected_set = set(selected_links)
+        
+        for trace in fig.data:
+            # Extract base link name (handle "A" or "A-93001" format)
+            trace_link = trace.name.split('-')[0] if '-' in trace.name else trace.name
+            
+            if trace_link in selected_set:
+                # Highlight selected traces
+                trace.opacity = 1.0
+                # if hasattr(trace, "line"): 
+                #     trace.line.width = 4  # Thicker than default
+                if hasattr(trace, "marker"): 
+                    trace.marker.size = 3  # Larger than default
+            else:
+                # Dim unselected traces
+                trace.opacity = 0.35
+                # if hasattr(trace, "line"): 
+                #     trace.line.width = 2
+                if hasattr(trace, "marker"): 
+                    trace.marker.size = 1
+
+    def _build_annotation(self, rc):
+        return [
+            dict(
+                x=0.02, y=0.97,
+                xref="paper", yref="paper",
+                showarrow=False,
+                align="left",
+                bgcolor="rgba(0,0,0,0.75)",
+                bordercolor="rgba(255,255,255,0.9)",
+                borderwidth=2,
+                borderpad=8,
+                font=dict(size=14, color="white"),
+                text=(
+                    f"<b>Rake Link {rc.linkName}</b><br>"
+                    f"Services: {len(rc.servicePath)}<br>"
+                    f"Start: {rc.servicePath[0].initStation.name}<br>"
+                    f"End: {rc.servicePath[-1].finalStation.name}<br>"
+                    f"Distance: {int(rc.lengthKm)} km<br>"
+                    f"Rake: {'AC' if rc.rake.isAC else 'Non-AC'} ({rc.rake.rakeSize}-car)<br>"
+                )
+            )
+        ]
     
     def drawLayout(self):
             return html.Div(
                 [
                     # Hidden store (optional)
+                    dcc.Store(id="rl-table-store"),
                     dcc.Store(id="app-state"),
 
                     # === LEFT SIDEBAR ===
@@ -370,38 +743,205 @@ class Simulator:
                     ),
 
                     # === RIGHT PANEL ===
+                    dcc.Store(id="graph-ready", data=False),
                     html.Div(
                         [
                             html.Div(id="status-div", className="text-box"),
+
+                            # === PILL TOGGLE + EXPORT BUTTON ROW ===
                             html.Div(
                                 [
-                                    dbc.Button(
-                                        "Export Summary",
-                                        id="export-button",
-                                        color="secondary",
-                                        outline=True,
-                                        # className="mt-2 mb-2",
-                                        disabled=True,
-                                    )
+                                    dbc.ButtonGroup(
+                                        [
+                                            dbc.Button("Visualization", id="mode-viz", color="primary", outline=True, active=True),
+                                            dbc.Button("Query Info", id="mode-details", color="primary", outline=True, active=False),
+                                        ],
+                                        size="sm",
+                                        className="mode-pill-toggle",
+                                        style={"marginLeft": "20px"} 
+                                    ),
+                                            html.Div(
+            dbc.Button(
+                "Convert to AC",
+                id="convert-ac-button",
+                color="primary",
+                outline=True,
+                disabled=True,
+            ),
+            style={"marginLeft": "auto", "marginRight": "8px"}
+        ),
+        html.Div(
+        dbc.Button(
+            "Reset",
+            id="reset-ac-button",
+            color="warning",
+            outline=True,
+            size="sm",
+        ),
+        style={"marginLeft": "4px"}
+        ),
+
+                                    html.Div(
+                                        dbc.Button(
+                                            "Export Summary",
+                                            id="export-button",
+                                            color="secondary",
+                                            outline=True,
+                                            disabled=True,
+                                        ),
+                                        className="ms-auto",  # push to right
+                                    ),
                                 ],
-                                className="d-flex justify-content-end", # Aligns button to the right
-                                style={"paddingRight": "40px"} # Small padding
+                                className="d-flex align-items-center justify-content-between mb-2",
                             ),
+
                             dcc.Download(id="download-report"),
-                            dcc.Graph(id="rake-3d-graph", style={"height": "75vh"}),
+
+                            # ---- DYNAMIC CONTENT ----
+                            html.Div(
+                                id="viz-container",
+                                children=[
+                                    dcc.Graph(id="rake-3d-graph", style={"height": "65vh"}),
+                                    html.Div(
+                                        id="rake-link-table-container",
+                                        children = [
+                                            html.Hr(),
+                                            html.Div(
+                                                id="rake-link-count",
+                                                style={"marginBottom": "6px", "fontWeight": "500"}
+                                            ),
+
+                                            dash_table.DataTable(
+                                                id="rake-link-table",
+                                                columns=[
+                                                    {"name": "Link", "id": "linkname"},
+                                                    {"name": "Cars", "id": "cars"},
+                                                    {"name": "AC?", "id": "is_ac"},
+                                                    {"name": "Length (km)", "id": "length_km"},
+                                                    {"name": "Start", "id": "start"},
+                                                    {"name": "End", "id": "end"},
+                                                    {"name": "#Svcs", "id": "n_services"},
+                                                ],
+                                                data=[],
+                                                row_selectable="multi",
+                                                selected_rows=[],
+                                                page_size=45,
+                                                sort_action="native",
+                                                filter_action="native",
+                                                style_table={"maxHeight": "260px", "overflowY": "auto"},
+                                                style_cell={"padding": "6px", "fontSize": "13px"},
+                                            )
+                                        ],
+                                        style={"padding": "10px 0px"}
+                                    ),
+
+# Add a new table that appears ONLY in service mode
+html.Div(
+    id="service-table-container",
+    children=[
+        html.Hr(),
+        html.Div(
+            id="service-count",
+            style={"marginBottom": "6px", "fontWeight": "500"}
+        ),
+        dash_table.DataTable(
+            id="service-table",
+            columns=[
+                {"name": "Service ID", "id": "service_id"},
+                {"name": "Direction", "id": "direction"},
+                {"name": "AC?", "id": "is_ac"},
+                {"name": "Cars", "id": "cars"},
+                {"name": "Start", "id": "start_station"},
+                {"name": "End", "id": "end_station"},
+                {"name": "Start Time", "id": "start_time"},
+                {"name": "Rake Link", "id": "rake_link"},
+            ],
+            data=[],
+            row_selectable="multi",
+            selected_rows=[],
+            page_size=45,
+            sort_action="native",
+            filter_action="native",
+            style_table={"maxHeight": "260px", "overflowY": "auto"},
+            style_cell={"padding": "6px", "fontSize": "13px"},
+        )
+    ],
+    style={"padding": "10px 0px", "display": "none"}  # Hidden by default
+)
+
+                                    # html.Div(
+                                    #     "Click 'Generate' to build visualization.",
+                                    #     style={
+                                    #         "position": "absolute",
+                                    #         "top": "50%",
+                                    #         "left": "50%",
+                                    #         "transform": "translate(-50%, -50%)",
+                                    #         "color": "#888",
+                                    #         "fontSize": "18px",
+                                    #         "display": "block"
+                                    #     },
+                                    # )
+                                ],
+                                style={"position": "relative", "height": "75vh"}
+                            ),
+
+                            html.Div(id="right-panel-content", style={"marginTop": "10px"}),
                         ],
                         className="eight columns",
                         id="page",
                     ),
+
+
                 ],
                 className="row flex-display",
                 style={"height": "100vh"},
             )
 
+
+    def convertRakeLinksToAC(self, link_names):
+        """
+        Convert specified rake links to AC.
+        Updates both Rake and Service objects.
+        
+        Args:
+            link_names: List of rake link names (e.g., ['A', 'B'])
+        
+        Returns:
+            dict with conversion summary
+        """
+        if not link_names:
+            return {"converted": 0, "links": []}
+        
+        converted = []
+        
+        for rc in self.parser.wtt.rakecycles:
+            if rc.linkName in link_names:
+                # Skip if already AC
+                if rc.rake and rc.rake.isAC:
+                    continue
+                
+                # Convert the rake
+                if rc.rake:
+                    rc.rake.isAC = True
+                
+                # Convert all services in this rake cycle
+                for svc in rc.servicePath:
+                    svc.needsACRake = True
+                
+                converted.append(rc.linkName)
+        
+        return {
+            "converted": len(converted),
+            "links": converted
+        }
+
     def initCallbacks(self):
         self._initFileUploadCallbacks()
         self._initButtonCallbacks()
         self._initFilterQueryCallbacks() 
+
+    def _is_valid_xlsx(self, filename):
+        return bool(filename) and filename.lower().endswith(".xlsx")
 
     def _initFilterQueryCallbacks(self):
         '''Each UI filter updates self.query attributes directly.'''
@@ -471,18 +1011,25 @@ class Simulator:
 
         @self.app.callback(
             Input('filter-tabs', 'active_tab'),
-            prevent_initial_call=False
+            State('time-range-slider', 'value'),
+            State('time-range-slider_service', 'value'),
+            State('time-range-slider_station', 'value'),
         )
-        def update_query_type(active_tab):
+        def update_query_type(active_tab, rk_time, svc_time, st_time):
+            # Update filter type
             if active_tab == "tab-rakelink":
                 self.query.type = FilterType.RAKELINK
-                self.query.inDirection = None  # clear irrelevant field
+                self.query.inTimePeriod = rk_time          # ← RESET TIME
+                self.query.inDirection = None
+
             elif active_tab == "tab-service":
                 self.query.type = FilterType.SERVICE
-            elif active_tab =="tab-station":
+                self.query.inTimePeriod = svc_time         # ← RESET TIME
+
+            elif active_tab == "tab-station":
                 self.query.type = FilterType.STATION
-            else:
-                self.query.type = None
+                self.query.inTimePeriod = st_time          # ← RESET TIME
+
             return None
         
     def _initFileUploadCallbacks(self):
@@ -506,7 +1053,6 @@ class Simulator:
                 "cursor": "pointer",
                 "transition": "all 0.2s ease",
             }
-
             if contents is None:
                 return html.Div([
                     html.Img(src="/assets/excel-icon.png",
@@ -519,6 +1065,7 @@ class Simulator:
 
             # When uploaded
             self.wttContents = contents
+            self.wttFileName = filename
             display_name = filename if len(filename) <= 40 else filename[:37] + "..."
             
             success_style = copy.deepcopy(base_style)
@@ -540,7 +1087,7 @@ class Simulator:
             Input('upload-summary-inline', 'contents'),
             State('upload-summary-inline', 'filename')
         )
-        def update_summary_filename(contents, filename):
+        def update_summary_filename(contents, filename):            
             base_style = {
                 "height": "140px",
                 "borderWidth": "2px",
@@ -564,6 +1111,7 @@ class Simulator:
                 ], className="text-center"), base_style
             
             self.summaryContents = contents
+            self.summaryFileName = filename
             # Truncate long filenames
             display_name = filename if len(filename) <= 40 else filename[:37] + "..."
             
@@ -662,6 +1210,8 @@ class Simulator:
             Input('upload-wtt-inline', 'contents')
         )
         def initFilters(wttContents):
+            if not self._is_valid_xlsx(self.wttFileName):
+                raise PreventUpdate
             if not wttContents:
                 return None,[],[],[],[],[],[] # should never reach here
             
@@ -689,6 +1239,12 @@ class Simulator:
         def initBackend(wttContents, summaryContents):
             if wttContents is None and summaryContents is None:
                 return
+
+            if not (
+                self._is_valid_xlsx(self.wttFileName)
+                and self._is_valid_xlsx(self.summaryFileName)
+            ):
+                raise PreventUpdate
             
             try:
                 summaryDecoded = base64.b64decode(summaryContents.split(',')[1])
@@ -702,11 +1258,427 @@ class Simulator:
                 print(f"Error initializing backend: {e}")
                 return 
 
-    def _initButtonCallbacks(self):        
+    def _initButtonCallbacks(self): 
+        @self.app.callback(
+            Output('rake-3d-graph', 'figure', allow_duplicate=True),
+            Output('rake-link-table', 'data', allow_duplicate=True),
+            Output('status-div', 'children', allow_duplicate=True),
+            Input('reset-ac-button', 'n_clicks'),
+            State('rake-3d-graph', 'figure'),
+            prevent_initial_call=True
+        )
+        def reset_ac_conversions(n_clicks, current_fig):
+            """Reset all AC conversions to original state from data"""
+            if not n_clicks:
+                raise PreventUpdate
+            
+            # Re-parse data to restore original state
+            # You'll need to store original AC status or re-read from files
+            # For now, just show message
+            status_msg = html.Div(
+                "Reset functionality requires storing original state",
+                style={"padding": "8px", "color": "#f59e0b"}
+            )
+            
+            raise PreventUpdate  # Implement full reset logic as needed
+        @self.app.callback(
+            Output('convert-ac-button', 'disabled'),
+            Input('rake-link-table', 'selected_rows'),
+            Input("filter-tabs", "active_tab"),
+            State('rake-link-table', 'data'),
+            prevent_initial_call=True
+        )
+        def toggle_convert_button(selected_rows, active_tab, table_data):
+            """Enable Convert to AC button only when non-AC links are selected in rakelink mode"""
+            if active_tab != "tab-rakelink" or not selected_rows or not table_data:
+                return True
+            
+            # Check if any selected link is non-AC
+            has_nonac = False
+            for idx in selected_rows:
+                if idx < len(table_data):
+                    if table_data[idx]["is_ac"] == "Non-AC":
+                        has_nonac = True
+                        break
+            
+            return not has_nonac  # Enable if we have at least one non-AC link
+
+        @self.app.callback(
+            Output('rake-3d-graph', 'figure', allow_duplicate=True),
+            Output('rake-link-table', 'data', allow_duplicate=True),
+            Output('status-div', 'children', allow_duplicate=True),
+            Input('convert-ac-button', 'n_clicks'),
+            State('rake-link-table', 'selected_rows'),
+            State('rake-link-table', 'data'),
+            State('rake-3d-graph', 'figure'),
+            prevent_initial_call=True
+        )
+        def handle_ac_conversion(n_clicks, selected_rows, table_data, current_fig):
+            """Convert selected rake links to AC and update visualization"""
+            if not n_clicks or not selected_rows or not table_data:
+                raise PreventUpdate
+            
+            # Get selected link names
+            selected_links = [
+                table_data[idx]["linkname"] 
+                for idx in selected_rows 
+                if idx < len(table_data)
+            ]
+            
+            # Perform conversion
+            result = self.convertRakeLinksToAC(selected_links)
+            
+            # Update table data (mark converted links as AC)
+            updated_table = table_data.copy()
+            for row in updated_table:
+                if row["linkname"] in result["links"]:
+                    row["is_ac"] = "AC"
+            
+            # Regenerate visualization with updated data
+            self._reset_render_flags()
+            self._apply_filters(self.query)
+            fig = self.visualizeLinks3D()
+            fig = self._post_process_station_mode(fig, self.query)
+            
+            # Re-apply highlighting if there were selections
+            if self.query.selectedLinks:
+                self._highlight_clicked(fig, self.query.selectedLinks)
+            
+            # Status message
+            status_msg = html.Div(
+                [
+                    html.Span("✓ ", style={"color": "#10b981", "fontWeight": "600"}),
+                    html.Span(f"Converted {result['converted']} rake link(s) to AC: "),
+                    html.Span(", ".join(result["links"]), style={"fontWeight": "500"})
+                ],
+                style={
+                    "padding": "8px 12px",
+                    "backgroundColor": "#d1fae5",
+                    "borderLeft": "3px solid #10b981",
+                    "borderRadius": "4px",
+                    "marginBottom": "8px"
+                }
+            )
+            
+            return fig, updated_table, status_msg
+
+        @self.app.callback(
+            Output("rake-link-table-container", "style"),  
+            Output("service-table-container", "style"),
+            Input("filter-tabs", "active_tab"),
+            Input("graph-ready", "data")
+        )
+        def toggle_table_display(active_tab, graph_ready):
+            if not graph_ready:
+                return {"display": "none"}, {"display": "none"}
+            
+            if active_tab == "tab-service":
+                # Hide rake table, show service table
+                return {"display": "none"}, {"padding": "10px 0px", "display": "block"}
+            else:
+                # Show rake table, hide service table (default for rake-link and station modes)
+                return {"padding": "10px 0px", "display": "block"}, {"display": "none"}       
+        
+        @self.app.callback(
+            Output('rake-3d-graph', 'figure', allow_duplicate=True),
+            Input('service-table', 'selected_rows'),
+            State('rake-3d-graph', 'figure'),
+            State('service-table', 'data'),
+            State("filter-tabs", "active_tab"),
+            prevent_initial_call=True
+        )
+        def update_graph_from_service_selection(selected_rows, current_fig, table_data, active_tab):
+            if active_tab != "tab-service" or current_fig is None or not current_fig.get('data'):
+                raise PreventUpdate
+            
+            # Extract selected service IDs
+            if not selected_rows or not table_data:
+                selected_services = []
+            else:
+                selected_services = [
+                    table_data[idx]["service_id"] 
+                    for idx in selected_rows 
+                    if idx < len(table_data)
+                ]
+            
+            # Update query state
+            self.query.selectedServices = selected_services
+            
+            # Apply highlighting
+            fig = go.Figure(current_fig)
+            self._highlight_clicked_services(fig, selected_services)
+            
+            return fig
+
+        @self.app.callback(
+            Output("service-table", "selected_rows"),
+            Input("rake-3d-graph", "clickData"),
+            State("service-table", "data"),
+            State("service-table", "selected_rows"),
+            State("filter-tabs", "active_tab"),
+            prevent_initial_call=True,
+        )
+        def toggle_service_from_graph(clickData, table_rows, current_selection, active_tab):
+            if active_tab != "tab-service" or not clickData or not table_rows:
+                return current_selection or []
+            
+            try:
+                # Extract service ID from hover text
+                # Format is "LinkName-ServiceID: Station @ Time"
+                hover_text = clickData["points"][0].get("hovertext", "")
+                
+                # Parse "A-93001: VIRAR @ 02:45" → "93001"
+                parts = hover_text.split(':')[0].strip()  # "A-93001"
+                if '-' in parts:
+                    clicked_service = parts.split('-')[1]  # "93001"
+                else:
+                    return current_selection or []
+                
+            except (KeyError, IndexError) as e:
+                print(f"Error extracting clicked service: {e}")
+                return current_selection or []
+            
+            # Find row index for this service
+            clicked_idx = None
+            for idx, row in enumerate(table_rows):
+                if clicked_service in row.get("service_id", ""):
+                    clicked_idx = idx
+                    break
+            
+            if clicked_idx is None:
+                return current_selection or []
+            
+            # Toggle selection
+            selected = list(current_selection or [])
+            if clicked_idx in selected:
+                selected.remove(clicked_idx)
+            else:
+                selected.append(clicked_idx)
+            
+            return selected
+            
+        @self.app.callback(
+            Output('rake-3d-graph', 'figure', allow_duplicate=True),
+            Input('rake-link-table', 'selected_rows'),
+            State('rake-3d-graph', 'figure'),
+            State('rake-link-table', 'data'),
+            prevent_initial_call=True
+        )
+        def update_graph_highlighting(selected_rows, current_fig, table_data):
+            """Update graph highlighting when selection changes without regenerating the entire plot"""
+            if current_fig is None or not current_fig.get('data'):
+                raise PreventUpdate
+            
+            # Extract selected link names
+            if not selected_rows or not table_data:
+                selected_links = []
+            else:
+                selected_links = [
+                    table_data[idx]["linkname"] 
+                    for idx in selected_rows 
+                    if idx < len(table_data)
+                ]
+            
+            # Update the query state
+            self.query.selectedLinks = selected_links
+            
+            # Apply highlighting to the existing figure
+            fig = go.Figure(current_fig)
+            self._highlight_clicked(fig, selected_links)
+            
+            return fig 
+
+        @self.app.callback(
+            Output("service-table", "data"),
+            Output("service-count", "children"),
+            Input('generate-button', 'n_clicks'),
+            Input('ac-selector', 'value'),
+            State("filter-tabs", "active_tab"),
+            prevent_initial_call=True
+        )
+        def build_service_table(n_clicks, ac_select, active_tab):
+            if n_clicks == 0 or self.parser is None or active_tab != "tab-service":
+                return [], ""
+            
+            rows = []
+            for svc in self.parser.wtt.suburbanServices:
+                if not svc.render or not svc.events:
+                    continue
+                
+                # Get service details
+                svc_id_str = ','.join(str(sid) for sid in svc.serviceId)
+                start_time = fmt_time(svc.events[0].atTime) if svc.events else "--:--"
+                
+                # Find which rake link this service belongs to
+                rake_link = "?"
+                for rc in self.parser.wtt.rakecycles:
+                    if svc in rc.servicePath:
+                        rake_link = rc.linkName
+                        break
+                
+                rows.append({
+                    "id": svc_id_str,  # Used for selection tracking
+                    "service_id": svc_id_str,
+                    "direction": svc.direction.name if svc.direction else "?",
+                    "is_ac": "AC" if svc.needsACRake else "Non-AC",
+                    "cars": svc.rakeSizeReq if svc.rakeSizeReq else "?",
+                    "start_station": svc.initStation.name if svc.initStation else "?",
+                    "end_station": svc.finalStation.name if svc.finalStation else "?",
+                    "start_time": start_time,
+                    "rake_link": rake_link,
+                })
+            
+            return rows, f"{len(rows)} services"
+        
+        @self.app.callback(
+            Output("rake-link-table", "data"),
+            Output("rl-table-store", "data"),
+            Output("rake-link-count", "children"),
+            Input('generate-button', 'n_clicks'),
+            Input('ac-selector', 'value'),
+            State('upload-wtt-inline', 'contents'),
+            State('upload-summary-inline', 'contents'),
+            prevent_initial_call=True
+        )
+        def build_rake_table(n_clicks, ac_select, wttContents, summaryContents):
+            time.sleep(2)
+            if n_clicks == 0 or self.parser is None:
+                return [], [], ""
+
+            rows = []
+            for rc in self.parser.wtt.rakecycles:
+                if not rc.render or rc.rake is None:
+                    continue
+
+                rows.append({
+                    "id": rc.linkName,
+                    "linkname": rc.linkName,
+                    "cars": rc.rake.rakeSize,
+                    "is_ac": "AC" if rc.rake.isAC else "Non-AC",
+                    "length_km": int(rc.lengthKm),
+                    "start": rc.servicePath[0].initStation.name,
+                    "end": rc.servicePath[-1].finalStation.name,
+                    "n_services": len(rc.servicePath),
+                })
+
+            return rows, rows, f"{len(rows)} rake links"
+
+        @self.app.callback(
+            Output("right-panel-content", "children", allow_duplicate=True),
+            Input('rake-link-table', 'selected_rows'),
+            State("mode-details", "active"),
+            prevent_initial_call=True
+        )
+        def update_query_info_on_selection(selected_rows, details_active):
+            """Update Query Info panel content when selection changes, but only if already viewing it"""
+            if not details_active:
+                # Don't update if we're not viewing Query Info
+                raise PreventUpdate
+            
+            # We're viewing Query Info, so update it
+            return self.build_query_info_panel()
+
+        @self.app.callback(
+            Output("rake-link-table", "selected_rows"),
+            Input("rake-3d-graph", "clickData"),
+            State("rake-link-table", "data"),
+            State("rake-link-table", "selected_rows"),
+            prevent_initial_call=True,
+        )
+        def toggle_row_from_graph(clickData, table_rows, current_selection):
+            """Add/remove clicked trace from selection"""
+            if not clickData or not table_rows:
+                return current_selection or []
+            
+            # Get clicked link name from the trace
+            try:
+                # The trace name is stored in the 'name' property of the clicked point's trace
+                curve_number = clickData["points"][0].get("curveNumber")
+                # We need to get the actual trace name from the figure, but we can't access it here
+                # Instead, use hovertext which contains the link name
+                hover_text = clickData["points"][0].get("hovertext", "")
+                
+                # Format is "LinkName: Station @ Time" or "LinkName-ServiceID: Station @ Time"
+                clicked_link = hover_text.split(':')[0].strip()
+                
+                # Handle service-level traces (format: "A-93001" -> "A")
+                clicked_link = clicked_link.split('-')[0]
+                
+                print(f"Clicked link from graph: {clicked_link}")
+                
+            except (KeyError, IndexError) as e:
+                print(f"Error extracting clicked link: {e}")
+                return current_selection or []
+            
+            # Find row index for this link
+            clicked_idx = None
+            for idx, row in enumerate(table_rows):
+                if row.get("linkname") == clicked_link:
+                    clicked_idx = idx
+                    break
+            
+            if clicked_idx is None:
+                print(f"Link {clicked_link} not found in table")
+                return current_selection or []
+            
+            # Toggle: add if not present, remove if present
+            selected = list(current_selection or [])
+            if clicked_idx in selected:
+                selected.remove(clicked_idx)
+                print(f"Removed {clicked_link} from selection")
+            else:
+                selected.append(clicked_idx)
+                print(f"Added {clicked_link} to selection")
+            
+            return selected
+        
+
+        @self.app.callback(
+            Output('app-state', 'data', allow_duplicate=True),  # Reuse existing store
+            Input('rake-link-table', 'selected_rows'),
+            State('rake-link-table', 'data'),
+            prevent_initial_call=True
+        )
+        def update_selected_rakes(selected_rows, table_data):
+            """Update self.query.selectedLinks when table selection changes"""
+            if not selected_rows or not table_data:
+                self.query.selectedLinks = []
+                return {"selectedLinks": []}
+            
+            # Extract link names from selected rows
+            selected_links = [
+                table_data[idx]["linkname"] 
+                for idx in selected_rows 
+                if idx < len(table_data)
+            ]
+            
+            self.query.selectedLinks = selected_links
+            return {"selectedLinks": selected_links}
+
+        @self.app.callback(
+            Output("viz-container", "style"),
+            Output("right-panel-content", "children"),
+            Output("mode-viz", "active"),
+            Output("mode-details", "active"),
+            Input("mode-viz", "n_clicks"),
+            Input("mode-details", "n_clicks"),
+            # REMOVED: Input('rake-link-table', 'selected_rows')  <-- This was the problem!
+        )
+        def switch_right_panel(viz_clicks, details_clicks):
+            ctx = dash.callback_context.triggered_id
+            
+            # Only switch when buttons are clicked, NOT when selection changes
+            if ctx == "mode-details":
+                return {"display": "none"}, self.build_query_info_panel(), False, True
+
+            # Default: show visualization
+            return {"display": "block"}, html.Div(), True, False
+           
         @self.app.callback(
             Output('status-div', 'children'),
             Output('rake-3d-graph', 'figure'),
             Output('export-button', 'disabled'),
+            Output("graph-ready", "data"),
             Input('generate-button', 'n_clicks'),
             Input('rake-3d-graph', 'clickData'),
             Input('ac-selector', 'value'),
@@ -715,169 +1687,76 @@ class Simulator:
             prevent_initial_call=True
         )
         def onGenerateClick(n_clicks, clickData, ac_status, wttContents, summaryContents):
+
             if n_clicks == 0 or wttContents is None or summaryContents is None:
-                return "", go.Figure(), True
+                return "", go.Figure(), True, False
 
             try:
-                # Show loading message
-                status_msg = html.Div([
-                    html.Div("Processing files...", style={"color": "#3b82f6", "fontWeight": "500"}),
-                    html.Div("This may take a few moments.", style={"fontSize": "12px", "color": "#64748b", "marginTop": "4px"})
-                ])
-                
-                # pass in the filters object
+                # Sync AC filter
                 self.query.ac = ac_status
                 qq = self.query
 
-                print(qq.passingThrough)
-
+                # First-time backend build
                 if not self.linkTimingsCreated:
-                    print("first time rc gen")
                     self.parser.wtt.generateRakeCycles()
                     self.linkTimingsCreated = True
 
-                # Branch filtering logic based on the active tab
-                # all rakelinks will be created already
-                if qq.type == FilterType.SERVICE:
-                    print("Applying Service Filters")
-                    self.applyServiceFilters(qq) # Use new service filter logic
-                elif qq.type == FilterType.STATION:
-                    print(qq)
-                    self.applyStationFilters(qq)
-                else:
-                    # Default to RakeLink filter
-                    print("Applying Rake Link Filters")
-                    self.applyLinkFilters(qq) # Use existing rake link logic
+                # Reset all state
+                self._reset_render_flags()
 
-                # create 3D plot
-                print(f"type: {qq.type}")
+                # Apply filters
+                self._apply_filters(qq)
+
+                # Generate base plot
                 fig = self.visualizeLinks3D()
 
-                if qq.type == FilterType.STATION:
-                    fig.update_layout(
-                        scene_camera=dict(
-                            eye=dict(x=0, y=0, z=1.5)   # 2D Plot
-                        ),
-                        scene=dict(
-                            aspectratio=dict(x=3, y=1.5, z=1.2)
-                        )
-                    )
-                    # create a custom query to detect gaps of size k minutes
-                    # in the given time period at the given stations
-                    k = 5
-                    sts = self.parser.wtt.stations
-                    t = qq.inTimePeriod
-                    # self.detectGaps(k, sts, t)
+                # Station mode post-processing
+                fig = self._post_process_station_mode(fig, qq)
 
-                    # mixing 
-                    before = utils.corridorMixingMinimal(qq.startStation, qq.endStation, qq.inTimePeriod[0], qq.inTimePeriod[1])
+                if self.query.selectedLinks:
+                    self._highlight_clicked(fig, self.query.selectedLinks)
 
-                    for i, rc in enumerate(self.parser.wtt.rakecycles):
-                        for svc in rc.servicePath:
-                            if i < len(self.parser.wtt.rakecycles)/2 + 10:
-                                svc.needsACRake = True
+                # Handle clicking a rake-link trace
+                # ctx = callback_context
+                # trigger = ctx.triggered[0]["prop_id"]
+                # if trigger == "rake-3d-graph.clickData" and qq.type == FilterType.RAKELINK:
 
-                    after = utils.corridorMixingMinimal(qq.startStation, qq.endStation, qq.inTimePeriod[0], qq.inTimePeriod[1])
+                #     if not clickData or "points" not in clickData or not clickData["points"]:
+                #         print("Reset: empty or invalid clickData")
+                #         for rc in self.parser.wtt.rakecycles:
+                #             rc.render = True
+                #         fig.update_layout(annotations=[])
+                #         return "", fig, False, True  # FIX: Return 4 values
 
-                    print("=== Mixing Report ===")
-                    for b, a in zip(before, after):
-                        print(f"{b['station']}: {b['mixing_score']:.3f} -> {a['mixing_score']:.3f}")
+                #     p = clickData["points"][0]
+                #     idx = p.get("curveNumber")
+                #     if idx is None or idx >= len(fig.data):
+                #         fig = self._reset_isolation(fig)
+                #         return "", fig, False, True
 
-                # rake link isolation
-                ctx = callback_context
-                trigger = ctx.triggered[0]["prop_id"]
+                #     clicked = fig.data[idx].name
+                #     print("Clicked Rake Link:", clicked)
 
-                # Only process graph clicks in RAKELINK mode
-                if trigger == "rake-3d-graph.clickData" and qq.type == FilterType.RAKELINK:
+                #     # Update render state
+                #     for rc in self.parser.wtt.rakecycles:
+                #         rc.render = (rc.linkName == clicked)
 
-                    #click empty space
-                    if clickData is None or not isinstance(clickData, dict) \
-                    or "points" not in clickData or not clickData["points"]:
-                        print("Reset: empty or invalid clickData")
-                        for rc in self.parser.wtt.rakecycles:
-                            rc.render = True
-                        fig.update_layout(annotations=[])
-                        return "", fig, False
+                #     # Highlight traces
+                #     self._highlight_clicked(fig, clicked)
 
-                    # malformed point
-                    point = clickData["points"][0]
-                    if not isinstance(point, dict) or "curveNumber" not in point:
-                        print("Reset: malformed point ", clickData)
-                        for rc in self.parser.wtt.rakecycles:
-                            rc.render = True
-                        fig.update_layout(annotations=[])
-                        return "", fig, False
+                #     # Annotation
+                #     rc = next(r for r in self.parser.wtt.rakecycles if r.linkName == clicked)
+                    # fig.update_layout(annotations=self._build_annotation(rc))
 
-                    # valid trace
-                    trace_index = point["curveNumber"]
-                    clicked_link = fig.data[trace_index].name
+                    return html.Div(), fig, False, True
 
-                    print("Clicked Rake Link:", clicked_link)
-
-                    # isolate selected rake link
-                    for rc in self.parser.wtt.rakecycles:
-                        rc.render = (rc.linkName == clicked_link)
-
-                    # fade/highlight
-                    for trace in fig.data:
-                        if trace.name != clicked_link:
-                            trace.opacity = 0.05
-                            trace.line.width = 2 if hasattr(trace, "line") else None
-                            trace.marker.size = 1.5 if hasattr(trace, "marker") else None
-                        else:
-                            trace.opacity = 1.0
-                            trace.line.width = 4 if hasattr(trace, "line") else None
-                            trace.marker.size = 3 if hasattr(trace, "marker") else None
-
-                    # annotation summary
-                    rc = next(r for r in self.parser.wtt.rakecycles if r.linkName == clicked_link)
-
-                    annot_text = (
-                        f"<b>Rake Link {rc.linkName}</b><br>"
-                        f"Services: {len(rc.servicePath)}<br>"
-                        f"Start: {rc.servicePath[0].initStation.name}<br>"
-                        f"End: {rc.servicePath[-1].finalStation.name}<br>"
-                        f"Distance: {int(rc.lengthKm)} km<br>"
-                        f"Rake: {'AC' if rc.rake.isAC else 'Non-AC'} ({rc.rake.rakeSize}-car)<br>"
-                        # f"<span style='font-size:11px;color:#eee'>Click empty space to reset</span>"
-                    )
-
-                    fig.update_layout(
-                        annotations=[
-                            dict(
-                                x=0.02, y=0.97,
-                                xref="paper", yref="paper",
-                                showarrow=False,
-                                align="left",
-                                bgcolor="rgba(0,0,0,0.75)",
-                                bordercolor="rgba(255,255,255,0.9)",
-                                borderwidth=2,
-                                borderpad=8,
-                                font=dict(size=14, color="white"),
-                                text=annot_text
-                            )
-                        ]
-                    )
-
-                    # return early (no summary when isolatinf)
-                    return "", fig, False
-
-                # summary contains
-                # - # Suburban Services
-                # - # AC services, Non-AC Services
-                # - # Rake Links generated, how many conflicting, how many dahanu road (rc.lengthKm = 0)
-                # - # 3 shortest and 3 longest rake link paths with distance
-                # in a html gui table
-                status = self.generateSummaryStatus()
-
-                return status, fig, False
+                # Default final return
+                return html.Div(), fig, False, True
 
             except Exception as e:
-                error_msg = html.Div([
-                    html.Div("✗ Error", style={"color": "#ef4444", "fontWeight": "600", "fontSize": "16px"}),
-                    html.Div(str(e), style={"fontSize": "12px", "color": "#64748b", "marginTop": "8px", "fontFamily": "monospace"})
-                ])
-                return error_msg, go.Figure(), True
+                import traceback
+                traceback.print_exc()
+                return (html.Div(f"Error: {e}"), go.Figure(), True, False)
 
     
         @self.app.callback(
@@ -927,18 +1806,23 @@ class Simulator:
         t_lower, t_upper = qq.inTimePeriod
         for rc in self.parser.wtt.rakecycles:
             rc.render = True
-    
+
         for svc in self.parser.wtt.suburbanServices:
             svc.render = True
 
-            if not svc.events: # invalid
+            # FIX: Check if events exist before accessing
+            if not svc.events:
                 svc.render = False
                 continue
 
-            # Also reset event render flags
             for ev in svc.events:
                 ev.render = True
-
+                
+                # FIX: Check if atTime exists
+                if ev.atTime is None:
+                    ev.render = False
+                    continue
+                    
                 t = ev.atTime
                 if not (t_lower <= t <= t_upper):
                     ev.render = False
@@ -970,7 +1854,7 @@ class Simulator:
             svc.checkStartStationConstraint(qq)
             svc.checkEndStationConstraint(qq)
             svc.checkPassingThroughConstraint(qq)
-            # print(f"constraint checks done for {svc}")
+            print(f"constraint checks done for {svc}")
         # print("all services constraint checks done")
         
         for rc in self.parser.wtt.rakecycles:
