@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 SERVICE_ID_LEN = 5
 
+
+
 class TimeTable:
     def __init__(self):
         # ground truth
@@ -51,12 +53,37 @@ class TimeTable:
         self.rakecycles = [] # needs timing info
         self.allCyclesWtt = [] # from wtt linked follow
         self.conflictingLinks = []
-
     
     # def generateRakeCyclePath(self, rakecycle):
     #     # Rakecycle contains the serviceIDs of a rake-link.
     #     # We simply find those services, get the stationpath with 
     #     # print(rakecycle)
+
+    def storeOriginalACStates(self):
+        """Store original AC states for reset capability"""
+        self.originalACStates = {}
+        for rc in self.rakecycles:
+            if rc.rake:
+                self.originalACStates[rc.linkName] = rc.rake.isAC
+            # Also store service AC requirements
+            for svc in rc.servicePath if rc.servicePath else []:
+                self.originalACStates[f"svc_{svc.serviceId[0]}"] = svc.needsACRake
+
+    def resetACStates(self):
+        """Reset all AC states to original"""
+        if not hasattr(self, 'originalACStates'):
+            return
+        
+        for rc in self.rakecycles:
+            if rc.rake and rc.linkName in self.originalACStates:
+                rc.rake.isAC = self.originalACStates[rc.linkName]
+            
+            # Reset service AC requirements
+            if rc.servicePath:
+                for svc in rc.servicePath:
+                    key = f"svc_{svc.serviceId[0]}"
+                    if key in self.originalACStates:
+                        svc.needsACRake = self.originalACStates[key]
 
 
     # We have a digraph, with nodes v repreented by 
@@ -438,6 +465,10 @@ class Day(Enum):
     SATURDAY = 'saturday'
     SUNDAY = 'sunday'
 
+class Line(Enum):
+    THROUGH = 'through/fast'
+    LOCAL = 'local/slow'
+
 class Service:
     '''Purely what can be extracted from a single column'''
     def __init__(self, type: ServiceType):
@@ -446,6 +477,7 @@ class Service:
         self.zone = None # western, central
         self.serviceId = None # a list
         self.direction = None # UP (VR->CCG) or DOWN (CCG to VR)
+        self.line = Line.THROUGH #Through (fast) or Local (L)
 
         self.rakeLinkName = None
         self.rakeSizeReq = None # 15 is default?, 12 is specified via "12 CAR", but what are blanks?
@@ -687,7 +719,6 @@ class EventType(Enum):
     ARRIVAL = 'ARRIVAL',
     DEPARTURE = 'DEPARTURE'
 
-    
 class StationEvent:
     def __init__(self, st, sv, time, type):
         self.atStation = st
@@ -1165,6 +1196,22 @@ class TimeTableParser:
 
         # print(f"Linked to: {linkedService} at {depTime}")
         return linkedService
+
+    def determineLineType(self, serviceCol, sheet):
+        '''Determine if service is Through (fast) or Local (slow) based on stations skipped'''
+        # Count stations with timing information vs total stations
+        timed_stations = 0
+        total_stations = 0
+        
+        for rowIdx, cell in serviceCol.items():
+            if TimeTableParser.rTimePattern.match(cell):
+                timed_stations += 1
+            total_stations += 1
+        
+        # If service stops at fewer than 60% of stations, consider it Through (fast)
+        if total_stations > 0 and (timed_stations / total_stations) < 0.4:
+            return Line.THROUGH
+        return Line.LOCAL
     
     @staticmethod
     def isServiceID(cell): # cell must be str
@@ -1294,6 +1341,7 @@ class TimeTableParser:
             service.rakeSizeReq = rakeSize
             service.zone = zone
             # service.rakeLinkName = linkName # initially None
+            service.line = self.determineLineType(clean, sheet)
 
             # needs AC?
             # Most AC services have specific dates.

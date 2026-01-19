@@ -15,6 +15,7 @@ import time
 import utils
 from dash import dash_table
 from dash.exceptions import PreventUpdate
+from timetable import Line
 
 
 from enum import Enum
@@ -28,12 +29,15 @@ class FilterType(Enum):
 @dataclass
 class FilterQuery:
     type: Optional[FilterType] = None
+    
+    # Make fields mode-specific (no properties needed)
     startStation: Optional[str] = None
     endStation: Optional[str] = None
     passingThrough: List[str] = field(default_factory=list)
-    inDirection: Optional[Direction] = None  # e.g. 'UP', 'DOWN', None
-    inTimePeriod: Optional[Tuple[int, int]] = (165, 1605) # e.g. (5, 12)
-    ac: Optional[bool] = None  # true, false
+    inTimePeriod: Optional[Tuple[int, int]] = (165, 1605)
+    
+    ac: Optional[bool] = None
+    inDirection: Optional[List[str]] = None
     selectedLinks: List[str] = field(default_factory=list)
     selectedServices: List[str] = field(default_factory=list)
 
@@ -73,6 +77,12 @@ class Simulator:
 
         self.query = FilterQuery()
         self.query.type = FilterType.RAKELINK
+
+        self.filterStates = {
+            FilterType.RAKELINK: {},
+            FilterType.SERVICE: {},
+            FilterType.STATION: {}
+        }
 
     def build_query_info_panel(self):
         if self.query.type == FilterType.RAKELINK:
@@ -778,7 +788,7 @@ class Simulator:
             outline=True,
             size="sm",
         ),
-        style={"marginLeft": "4px"}
+        style={"marginLeft": "4px", "display": "None"}
         ),
 
                                     html.Div(
@@ -805,7 +815,7 @@ class Simulator:
                                     html.Div(
                                         id="rake-link-table-container",
                                         children = [
-                                            html.Hr(),
+                                            # html.Hr(style={"margin": "20px 0 10px 0"}),
                                             html.Div(
                                                 id="rake-link-count",
                                                 style={"marginBottom": "6px", "fontWeight": "500"}
@@ -1030,6 +1040,40 @@ html.Div(
                 self.query.type = FilterType.STATION
                 self.query.inTimePeriod = st_time          # ← RESET TIME
 
+            return None
+
+        @self.app.callback(
+            Output('app-state', 'data', allow_duplicate=True),
+            Input('filter-tabs', 'active_tab'),
+            prevent_initial_call=True 
+        )
+        def update_query_type(active_tab):
+            # Save current filter state
+            if self.query.type:
+                self.filterStates[self.query.type] = {
+                    'startStation': self.query.startStation,
+                    'endStation': self.query.endStation,
+                    'passingThrough': self.query.passingThrough.copy(),
+                    'inTimePeriod': self.query.inTimePeriod,
+                    'inDirection': self.query.inDirection,
+                }
+            
+            # Update type
+            if active_tab == "tab-rakelink":
+                self.query.type = FilterType.RAKELINK
+            elif active_tab == "tab-service":
+                self.query.type = FilterType.SERVICE
+            elif active_tab == "tab-station":
+                self.query.type = FilterType.STATION
+            
+            # Restore saved state for new tab
+            saved = self.filterStates.get(self.query.type, {})
+            self.query.startStation = saved.get('startStation')
+            self.query.endStation = saved.get('endStation')
+            self.query.passingThrough = saved.get('passingThrough', [])
+            self.query.inTimePeriod = saved.get('inTimePeriod', (165, 1605))
+            self.query.inDirection = saved.get('inDirection')
+            
             return None
         
     def _initFileUploadCallbacks(self):
@@ -1347,13 +1391,13 @@ html.Div(
             # Status message
             status_msg = html.Div(
                 [
-                    html.Span("✓ ", style={"color": "#10b981", "fontWeight": "600"}),
+                    # html.Span("✓ ", style={"color": "#10b981", "fontWeight": "600"}),
                     html.Span(f"Converted {result['converted']} rake link(s) to AC: "),
                     html.Span(", ".join(result["links"]), style={"fontWeight": "500"})
                 ],
                 style={
                     "padding": "8px 12px",
-                    "backgroundColor": "#d1fae5",
+                    # "backgroundColor": "#d1fae5",
                     "borderLeft": "3px solid #10b981",
                     "borderRadius": "4px",
                     "marginBottom": "8px"
@@ -1497,7 +1541,12 @@ html.Div(
             prevent_initial_call=True
         )
         def build_service_table(n_clicks, ac_select, active_tab):
-            if n_clicks == 0 or self.parser is None or active_tab != "tab-service":
+            is_service_mode = (
+                active_tab == "tab-service" or 
+                self.query.type == FilterType.SERVICE
+            )
+
+            if n_clicks == 0 or self.parser is None or not is_service_mode:
                 return [], ""
             
             rows = []
@@ -1679,6 +1728,8 @@ html.Div(
             Output('rake-3d-graph', 'figure'),
             Output('export-button', 'disabled'),
             Output("graph-ready", "data"),
+            Output("rake-link-table", "selected_rows", allow_duplicate=True),  
+            Output("service-table", "selected_rows", allow_duplicate=True),    
             Input('generate-button', 'n_clicks'),
             Input('rake-3d-graph', 'clickData'),
             Input('ac-selector', 'value'),
@@ -1689,17 +1740,23 @@ html.Div(
         def onGenerateClick(n_clicks, clickData, ac_status, wttContents, summaryContents):
 
             if n_clicks == 0 or wttContents is None or summaryContents is None:
-                return "", go.Figure(), True, False
+                return "", go.Figure(), True, False, [], []
 
             try:
                 # Sync AC filter
                 self.query.ac = ac_status
+
+                self.query.selectedLinks = []
+                self.query.selectedServices = []
                 qq = self.query
 
                 # First-time backend build
                 if not self.linkTimingsCreated:
                     self.parser.wtt.generateRakeCycles()
+                    self.parser.wtt.storeOriginalACStates() 
                     self.linkTimingsCreated = True
+                else:
+                    self.parser.wtt.resetACStates()
 
                 # Reset all state
                 self._reset_render_flags()
@@ -1748,15 +1805,15 @@ html.Div(
                 #     rc = next(r for r in self.parser.wtt.rakecycles if r.linkName == clicked)
                     # fig.update_layout(annotations=self._build_annotation(rc))
 
-                    return html.Div(), fig, False, True
+                    # return html.Div(), fig, False, True
 
                 # Default final return
-                return html.Div(), fig, False, True
+                return html.Div(), fig, False, True, [], []
 
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                return (html.Div(f"Error: {e}"), go.Figure(), True, False)
+                return (html.Div(f"Error: {e}"), go.Figure(), True, False, [], [])
 
     
         @self.app.callback(
@@ -2207,89 +2264,61 @@ html.Div(
         stationToY = {st.upper(): distanceMap[st.upper()] for st in distanceMap}
 
         all_traces = []
-        z_labels = []
-        z_offset = 0
-
+        
+        # Define Z positions for Through vs Local
+        z_positions = {
+            Line.THROUGH: 0,
+            Line.LOCAL: 40  # Offset for local trains
+        }
+        
         # Check if we're filtering by service (granular) or rake link (coarse)
         is_service_filter = (self.query.type == FilterType.SERVICE)
 
         for rc in rakecycles:
-            # --- SERVICE FILTER MODE: Only render filtered services ---
+            # Skip if not rendered
+            if not rc.render:
+                continue
+            
+            # --- SERVICE FILTER MODE: Plot individual services on their respective line types ---
             if is_service_filter:
-            # Don't check rc.render here - we only care about individual services
                 for svc in rc.servicePath:
                     # Skip services that don't pass the filter
                     if not svc.render:
                         continue
 
                     # Build points for this single service
-                    # Separate lists for in-range vs out-of-range events
                     x_in, y_in, z_in, labels_in = [], [], [], []
-                    x_out, y_out, z_out, labels_out = [], [], [], []
+                    
+                    # Use service-specific line type for z
+                    service_z = z_positions.get(svc.line, z_positions[Line.THROUGH])
                     
                     for ev in svc.events:
-                        # if not ev.atTime or not ev.atStation:
-                        #     continue
-
                         minutes = ev.atTime
-
                         stName = str(ev.atStation).strip().upper()
                         if stName not in stationToY:
                             continue
 
-                        # # Check if event is within the filtered time range
-                        # ev_render = getattr(ev, 'render', True)
-                        
-                        # if ev_render:
-                        # Event is in the time filter range
                         x_in.append(minutes)
                         y_in.append(stationToY[stName])
-                        z_in.append(z_offset)
+                        z_in.append(service_z)
                         labels_in.append(stName)
-                        # else:
-                        #     # Event is outside the time filter range
-                        #     x_out.append(minutes)
-                        #     y_out.append(stationToY[stName])
-                        #     z_out.append(z_offset)
-                        #     labels_out.append(stName)
 
-                    # Format service IDs for display (handle list of IDs)
-                    svc_id_str = ','.join(str(sid) for sid in svc.serviceId) if svc.serviceId else '?'
-                    
-                    # Create trace for OUT-OF-RANGE events (dimmed, background context)
-                    if x_out:
-                        color_dim = "rgba(66,133,244,0.6)" if svc.needsACRake else "rgba(90,90,90,0.6)"
-                        
-                        all_traces.append(
-                            go.Scatter3d(
-                                x=x_out, y=y_out, z=z_out,
-                                mode="lines+markers",
-                                line=dict(color=color_dim),
-                                marker=dict(size=2, color=color_dim),
-                                hovertext=[
-                                    f"{svc_id_str}: {st} @ {(int(xx)//60) % 24:02d}:{int(xx%60):02d} (outside filter)"
-                                    for xx, st in zip(x_out, labels_out)
-                                ],
-                                hoverinfo="text",
-                                name=f"{rc.linkName}-{svc_id_str} (context)",
-                                showlegend=False,  # Don't clutter legend with dimmed traces
-                                visible=True,
-                            )
-                        )
-                    
-                    # Create trace for IN-RANGE events (prominent, filtered results)
-                    # color = "rgba(66,133,244,0.8)" if svc.needsACRake else "rgba(90,90,90,0.8)"
+                    # Create trace for IN-RANGE events
                     if x_in:
+                        svc_id_str = ','.join(str(sid) for sid in svc.serviceId) if svc.serviceId else '?'
                         color_bright = "rgba(66,133,244,0.8)" if svc.needsACRake else "rgba(90,90,90,0.8)"
+                        
+                        # Determine line type for display
+                        line_display = svc.line.value if svc.line else "Unknown"
                         
                         all_traces.append(
                             go.Scatter3d(
                                 x=x_in, y=y_in, z=z_in,
                                 mode="lines+markers",
                                 line=dict(color=color_bright),
-                                marker=dict(size=2, color=color_bright),  # Larger markers
+                                marker=dict(size=2, color=color_bright),
                                 hovertext=[
-                                    f"{svc_id_str}: {st} @ {(int(xx)//60) % 24:02d}:{int(xx%60):02d}"
+                                    f"{svc_id_str} ({line_display}): {st} @ {(int(xx)//60) % 24:02d}:{int(xx%60):02d}"
                                     for xx, st in zip(x_in, labels_in)
                                 ],
                                 hoverinfo="text",
@@ -2297,52 +2326,45 @@ html.Div(
                                 visible=True,
                             )
                         )
-                        z_labels.append((z_offset, f"{rc.linkName}-{svc_id_str}"))
-                    
-                    # Only increment z if we rendered something
-                    if x_in or x_out:
-                        z_offset += 40  # increment z for next service
 
-            # RAKELINK mode
+            # --- RAKELINK mode - plot entire rake links on DEFAULT plane (Through) ---
             else:
-                # Check if this rake cycle passes the rake link filters
-                if not rc.render:
-                    continue
-
-                if self.query.type == FilterType.STATION:
-                    mode = "markers"
-                elif self.query.type ==FilterType.RAKELINK:
-                    mode = "lines+markers"
+                # For rake link view, plot all on Through plane for unified view
+                # Or optionally color-code by majority line type but keep same z
+                z_base = z_positions[Line.THROUGH]  # Default to Through plane
                 
-                # Aggregate all services in the rake cycle into a single trace
+                # Count line types for coloring/info
+                through_count = sum(1 for svc in rc.servicePath if svc.line == Line.THROUGH)
+                local_count = len(rc.servicePath) - through_count
+                majority_line = Line.THROUGH if through_count >= local_count else Line.LOCAL
+                
+                mode = "markers" if self.query.type == FilterType.STATION else "lines+markers"
                 x, y, z, stationLabels = [], [], [], []
 
                 for svc in rc.servicePath:
                     if not svc.render:
                         continue
-                    # In rake link mode, we render all services in a visible rake cycle
                     for ev in svc.events:
                         if not ev.atTime or not ev.atStation:
                             continue
-
                         if not ev.render:
                             continue
                             
                         minutes = ev.atTime
-                        # print(minutes)
-
                         stName = str(ev.atStation).strip().upper()
                         if stName not in stationToY:
                             continue
 
                         x.append(minutes)
                         y.append(stationToY[stName])
-                        z.append(z_offset)
+                        z.append(z_base)  # All on same plane for rake link view
                         stationLabels.append(stName)
                 
-                # Create single trace for entire rake cycle
                 if x:
                     color = "rgba(66,133,244,0.8)" if rc.rake.isAC else "rgba(90,90,90,0.8)"
+                    
+                    # Add line mix info to hover text
+                    line_mix = f"{through_count}T/{local_count}L"
                     
                     all_traces.append(
                         go.Scatter3d(
@@ -2350,35 +2372,55 @@ html.Div(
                             mode=mode,
                             line=dict(color=color),
                             marker=dict(size=2, color=color),
-                            # customdata=[{"link": rc.linkName} for _ in x],
                             hovertext=[
-                                f"{rc.linkName}: {st} @ {(int(xx)//60) % 24:02d}:{int(xx%60):02d}"
+                                f"{rc.linkName} ({line_mix}): {st} @ {(int(xx)//60) % 24:02d}:{int(xx%60):02d}"
                                 for xx, st in zip(x, stationLabels)
                             ],
-
                             hoverinfo="text",
-                            name=rc.linkName,
+                            name=f"{rc.linkName}",
                             visible=True,
                         )
                     )
-                    z_labels.append((z_offset, rc.linkName))
-                    z_offset += 40  # increment z for next rakecycle
         
-        if self.query.inTimePeriod and (self.query.type == FilterType.SERVICE or 
-                                        self.query.type == FilterType.STATION):
-            x_start, x_end = self.query.inTimePeriod
-            x_end += 90 # padding
+        # Determine x-axis range based on actual data
+        if not all_traces:
+            x_start, x_end = 165, 1605
         else:
-            x_start, x_end  = 165, 1605
-        # padding = 120  # 120 minutes
-        # x_end = (x_end + padding)
-        # x_start = max(0, x_start - padding)
+            # Find min and max x across all traces
+            all_x = []
+            for trace in all_traces:
+                if trace.x is not None:
+                    all_x.extend(trace.x)
+            x_start = min(all_x) if all_x else 165
+            x_end = max(all_x) if all_x else 1605
+            
+        padding = 60
+        x_start = max(0, x_start - padding)
+        x_end = x_end + padding
 
-        tickPositions = list(range(x_start, x_end + 1, 120))
+        tickPositions = list(range(int(x_start), int(x_end) + 1, 120))
         tickLabels = [f"{(t // 60) % 24:02d}:{int(t % 60):02d}" for t in tickPositions]
 
         yTickVals = list(stationToY.values())
         yTickText = list(stationToY.keys())
+        
+        # Z-axis configuration
+        if is_service_filter:
+            # In service mode, show Through/Local labels
+            z_tickvals = list(z_positions.values())
+            z_ticktext = [line_type.value.capitalize() for line_type in z_positions.keys()]
+            z_title = "Line Type"
+            # Set z-range to include both Through and Local planes
+            z_min = min(z_tickvals) - 20
+            z_max = max(z_tickvals) + 20
+        else:
+            # In rake link mode, keep single plane
+            z_tickvals = [z_positions[Line.THROUGH]]
+            z_ticktext = ["Rake Links"]
+            z_title = ""
+            # Keep tight z-range around single plane
+            z_min = z_positions[Line.THROUGH] - 5
+            z_max = z_positions[Line.THROUGH] + 5
 
         fig = go.Figure(data=all_traces)
 
@@ -2405,9 +2447,10 @@ html.Div(
                 zaxis=dict(
                     showgrid=True,
                     showspikes=False,
-                    title="Service" if is_service_filter else "Rake Cycle",
-                    tickvals=[zv for zv, _ in z_labels],
-                    ticktext=[zl for _, zl in z_labels],
+                    title=z_title,
+                    tickvals=z_tickvals,
+                    ticktext=z_ticktext,
+                    range=[z_min, z_max],
                 ),
                 camera=dict(
                     eye=dict(x=0, y=0, z=2.5),
@@ -2415,14 +2458,51 @@ html.Div(
                     center=dict(x=0, y=0, z=0)
                 ),
                 aspectmode="manual",
-                aspectratio=dict(x=2.8, y=1.2, z=1.2)
+                aspectratio=dict(x=2.8, y=1.2, z=0.8)
             ),
             scene_camera_projection_type="orthographic",
             width=1300,
             height=700,
             margin=dict(t=0, l=5, b=5, r=5),
-            autosize=True
+            autosize=True,
+
+            updatemenus=[
+                        dict(
+                            type="buttons",
+                            direction="left",
+                            buttons=[
+                                dict(
+                                    args=[{"scene.camera": dict(eye=dict(x=0, y=0, z=2.5),
+                                                                up=dict(x=0, y=1, z=0),
+                                                                center=dict(x=0, y=0, z=0))}],
+                                    label="Side View",
+                                    method="update"
+                                ),
+                                dict(
+                                    args=[{"scene.camera": dict(eye=dict(x=0, y=2.5, z=0.1),
+                                                                up=dict(x=0, y=0, z=1),
+                                                                center=dict(x=0, y=0, z=0))}],
+                                    label="Top View",
+                                    method="update"
+                                ),
+                                dict(
+                                    args=[{"scene.camera": dict(eye=dict(x=1.5, y=1.5, z=1.5),
+                                                                up=dict(x=0, y=0, z=1),
+                                                                center=dict(x=0, y=0, z=0))}],
+                                    label="3D View",
+                                    method="update"
+                                )
+                            ],
+                            pad={"r": 10, "t": 10},
+                            showactive=True,
+                            x=0.05,
+                            xanchor="left",
+                            y=0.05,
+                            yanchor="bottom"
+                        )
+                    ]
         )
+
 
         return fig
 
