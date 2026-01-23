@@ -477,7 +477,7 @@ class Service:
         self.zone = None # western, central
         self.serviceId = None # a list
         self.direction = None # UP (VR->CCG) or DOWN (CCG to VR)
-        self.line = Line.THROUGH #Through (fast) or Local (L)
+        self.line = None #Through (fast) or Local (L)
 
         self.rakeLinkName = None
         self.rakeSizeReq = None # 15 is default?, 12 is specified via "12 CAR", but what are blanks?
@@ -873,12 +873,10 @@ class TimeTableParser:
         print(f"\nSuburban services identified: {len(suburbanServices)} / {len(self.wtt.upServices) + len(self.wtt.downServices)}")
         return suburbanServices
 
+    # timetable.py -> class TimeTableParser
     def parseRakeLinks(self, sheet):
         allServices = self.wtt.upServices + self.wtt.downServices
-        # print(len(allServices))
         sheet = sheet.reset_index(drop=True)
-
-        # print(f"Summary sheet rows: {len(sheet)}")
 
         for i in range(len(sheet)):
             sIDRow = sheet.iloc[i]
@@ -891,45 +889,70 @@ class TimeTableParser:
             if not TimeTableParser.rLinkNamePattern.match(linkName):
                 continue
 
-            # collect all valid service IDs in this row
-            # in order
-            sIds = []
-            for cell in sIDRow.iloc[2:]:
+            # Identify the speed row (FAST/SLOW is 2 rows below Service IDs)
+            lineRow = None
+            if i + 2 < len(sheet):
+                lineRow = sheet.iloc[i + 2]
+
+            # collect all valid service IDs and their corresponding speed labels
+            # We store them as pairs to maintain the column association
+            service_entries = []
+            
+            # Use enumerate to keep track of column indices relative to iloc[2:]
+            for col_offset, cell in enumerate(sIDRow.iloc[2:]):
                 if pd.isna(cell):
                     continue
                 cell = str(cell)
                 
-                # use the serviceID idiom
                 if TimeTableParser.isServiceID(cell):
-                    # print("found sids")
-                    # numeric or ETY-style
+                    # --- Existing extraction logic ---
                     matchEty = TimeTableParser.rEtyPattern.search(cell)
                     if matchEty:
-                        sIds.append(matchEty.group(0))  # store the ETY token as string
+                        sid_val = matchEty.group(0)
                     else:
-                        # # print("no ety")
-                        # # print(cell)
-                        sIds.append(int(re.search(r'\d+', cell).group())) # extract the integer ex 93232 L/SPL
+                        digit_match = re.search(r'\d+', cell)
+                        sid_val = int(digit_match.group()) if digit_match else cell
 
-            if not sIds:
+                    # ---  line Extraction Logic ---
+                    line_label = None
+                    if lineRow is not None:
+                        # Absolute column index is col_offset + 2
+                        raw_line = lineRow.iloc[col_offset + 2]
+                        if not pd.isna(raw_line):
+                            val = str(raw_line).strip()
+                            # Mark with label if match, else store raw string
+                            if val.upper() in ["FAST", "SLOW"]:
+                                line_label = val.upper()
+                            else:
+                                if "FAST" in val.upper() or "SLOW" in val.upper():
+                                    line_label = val
+                        
+                    
+                    service_entries.append((sid_val, line_label))
+
+            if not service_entries:
                 continue
 
             rc = RakeCycle(linkName)
 
-            for sid in sIds:
-                rc.serviceIds.append(sid) # serviceIds stores every sid in summary
-                service = next((s for s in allServices if sid in s.serviceId), None)
-                if not service:
-                    rc.undefinedIds.append((linkName, sid)) # but we also mark undefined services
+            for sid, speed in service_entries:
+                rc.serviceIds.append(sid)
+                # Match with Service objects (casting to string for robust comparison)
+                service = next((s for s in allServices if str(sid) in str(s.serviceId)), None)
+                if service:
+                    service.linkName = linkName
+                    service.speed = speed # Assign the extracted speed label
+                else:
+                    rc.undefinedIds.append((linkName, sid))
 
-            self.wtt.rakecycles.append(rc) # servicepaths not yet created.
+            self.wtt.rakecycles.append(rc)
 
-        # summary
-        if rc.undefinedIds:
+        # summary (Logic remains the same as your original)
+        if 'rc' in locals() and rc.undefinedIds:
             print(f"\n{len(rc.undefinedIds)} service IDs from summary sheet not found in detailed WTT:")
             for linkName, sid in rc.undefinedIds:
                 print(f" ** Link {linkName}: Service {sid}")
-        else:
+        elif 'rc' in locals():
             print("\nAll rake link service IDs successfully matched with WTT services.")
     
     def parseWttSummary(self, filePathXlsx):
@@ -1341,7 +1364,7 @@ class TimeTableParser:
             service.rakeSizeReq = rakeSize
             service.zone = zone
             # service.rakeLinkName = linkName # initially None
-            service.line = self.determineLineType(clean, sheet)
+            # service.line = self.determineLineType(clean, sheet)
 
             # needs AC?
             # Most AC services have specific dates.

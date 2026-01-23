@@ -1827,10 +1827,16 @@ html.Div(
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
             filename = f"wtt_report_{filter_type}_{timestamp}.txt"
+            filename_xlsx = f"WTT_Export_{filter_type}_{timestamp}.xlsx"
+
+            # Use dcc.send_data_frame to export to Excel
+            report_xlsx = self.exportXlsx()
+            return dcc.send_data_frame(report_xlsx.to_excel, filename_xlsx, index=False)
             
-            report_content = self.exportResults() 
+            # report_content = self.exportResults() 
             
-            return dict(content=report_content, filename=filename)
+            # return dict(content=report_content, filename=filename)
+        
         
     def detectGaps(self, size, stations, inTime):
         print(f"# Gaps > {size} minutes:")
@@ -1924,6 +1930,42 @@ html.Div(
         visible_cycles = len([r for r in self.parser.wtt.rakecycles if r.render])
         # print(f"Visible services after filter: {visible_services}")
         # print(f"Visible rake cycles after filter: {visible_cycles}")
+
+    def exportXlsx(self):
+        """
+        Generates a Pandas DataFrame containing the filtered services with 
+        columns for Direction, Line, Service ID, Stations, and Timings.
+        """
+        rows = []
+        
+        # Collect services based on the current filter/render state
+        # Usually, self.parser.wtt.suburbanServices contains all services
+        for svc in self.parser.wtt.suburbanServices:
+            if not getattr(svc, 'render', True):
+                continue
+                
+            # Formatting Departure and Arrival
+            # Departure is the first event, Arrival is the last event
+            dep_time = "--:--"
+            arr_time = "--:--"
+            if svc.events:
+                dep_time = fmt_time(svc.events[0].atTime)
+                arr_time = fmt_time(svc.events[-1].atTime)
+
+            # Determine Line (Fast/Slow)
+            # Typically Line.THROUGH is Fast and Line.LOCAL is Slow
+            line_str = "Fast" if svc.line == tt.Line.THROUGH else "Slow"
+
+            rows.append({
+                "Service ID": ", ".join(str(sid) for sid in svc.serviceId),
+                "Start Time": dep_time,
+                "Source": svc.initStation.name,
+                "Destination": svc.finalStation.name,
+                "Direction": svc.direction.name,   # UP or DOWN
+                "Line": line_str,                  # Fast or Slow
+            })
+
+        return pd.DataFrame(rows)
             
     def exportResults(self):
             buffer = io.StringIO() # Use StringIO to capture print output
@@ -2264,61 +2306,89 @@ html.Div(
         stationToY = {st.upper(): distanceMap[st.upper()] for st in distanceMap}
 
         all_traces = []
-        
-        # Define Z positions for Through vs Local
-        z_positions = {
-            Line.THROUGH: 0,
-            Line.LOCAL: 40  # Offset for local trains
-        }
-        
+        z_labels = []
+        z_offset = 0
+
         # Check if we're filtering by service (granular) or rake link (coarse)
         is_service_filter = (self.query.type == FilterType.SERVICE)
 
         for rc in rakecycles:
-            # Skip if not rendered
-            if not rc.render:
-                continue
-            
-            # --- SERVICE FILTER MODE: Plot individual services on their respective line types ---
+            # --- SERVICE FILTER MODE: Only render filtered services ---
             if is_service_filter:
+            # Don't check rc.render here - we only care about individual services
                 for svc in rc.servicePath:
                     # Skip services that don't pass the filter
                     if not svc.render:
                         continue
 
                     # Build points for this single service
+                    # Separate lists for in-range vs out-of-range events
                     x_in, y_in, z_in, labels_in = [], [], [], []
-                    
-                    # Use service-specific line type for z
-                    service_z = z_positions.get(svc.line, z_positions[Line.THROUGH])
+                    x_out, y_out, z_out, labels_out = [], [], [], []
                     
                     for ev in svc.events:
+                        # if not ev.atTime or not ev.atStation:
+                        #     continue
+
                         minutes = ev.atTime
+
                         stName = str(ev.atStation).strip().upper()
                         if stName not in stationToY:
                             continue
 
+                        # # Check if event is within the filtered time range
+                        # ev_render = getattr(ev, 'render', True)
+                        
+                        # if ev_render:
+                        # Event is in the time filter range
                         x_in.append(minutes)
                         y_in.append(stationToY[stName])
-                        z_in.append(service_z)
+                        z_in.append(z_offset)
                         labels_in.append(stName)
+                        # else:
+                        #     # Event is outside the time filter range
+                        #     x_out.append(minutes)
+                        #     y_out.append(stationToY[stName])
+                        #     z_out.append(z_offset)
+                        #     labels_out.append(stName)
 
-                    # Create trace for IN-RANGE events
-                    if x_in:
-                        svc_id_str = ','.join(str(sid) for sid in svc.serviceId) if svc.serviceId else '?'
-                        color_bright = "rgba(66,133,244,0.8)" if svc.needsACRake else "rgba(90,90,90,0.8)"
+                    # Format service IDs for display (handle list of IDs)
+                    svc_id_str = ','.join(str(sid) for sid in svc.serviceId) if svc.serviceId else '?'
+                    
+                    # Create trace for OUT-OF-RANGE events (dimmed, background context)
+                    if x_out:
+                        color_dim = "rgba(66,133,244,0.6)" if svc.needsACRake else "rgba(90,90,90,0.6)"
                         
-                        # Determine line type for display
-                        line_display = svc.line.value if svc.line else "Unknown"
+                        all_traces.append(
+                            go.Scatter3d(
+                                x=x_out, y=y_out, z=z_out,
+                                mode="lines+markers",
+                                line=dict(color=color_dim),
+                                marker=dict(size=2, color=color_dim),
+                                hovertext=[
+                                    f"{svc_id_str}: {st} @ {(int(xx)//60) % 24:02d}:{int(xx%60):02d} (outside filter)"
+                                    for xx, st in zip(x_out, labels_out)
+                                ],
+                                hoverinfo="text",
+                                name=f"{rc.linkName}-{svc_id_str} (context)",
+                                showlegend=False,  # Don't clutter legend with dimmed traces
+                                visible=True,
+                            )
+                        )
+                    
+                    # Create trace for IN-RANGE events (prominent, filtered results)
+                    # color = "rgba(66,133,244,0.8)" if svc.needsACRake else "rgba(90,90,90,0.8)"
+                    if x_in:
+                        color_bright = "rgba(66,133,244,0.8)" if svc.needsACRake else "rgba(90,90,90,0.8)"
                         
                         all_traces.append(
                             go.Scatter3d(
                                 x=x_in, y=y_in, z=z_in,
                                 mode="lines+markers",
                                 line=dict(color=color_bright),
-                                marker=dict(size=2, color=color_bright),
+                                marker=dict(size=2, color=color_bright),  # Larger markers
                                 hovertext=[
-                                    f"{svc_id_str} ({line_display}): {st} @ {(int(xx)//60) % 24:02d}:{int(xx%60):02d}"
+                                    f"{svc_id_str}: {st} @ {(int(xx)//60) % 24:02d}:{int(xx%60):02d}"
                                     for xx, st in zip(x_in, labels_in)
                                 ],
                                 hoverinfo="text",
@@ -2326,45 +2396,52 @@ html.Div(
                                 visible=True,
                             )
                         )
+                        z_labels.append((z_offset, f"{rc.linkName}-{svc_id_str}"))
+                    
+                    # Only increment z if we rendered something
+                    if x_in or x_out:
+                        z_offset += 40  # increment z for next service
 
-            # --- RAKELINK mode - plot entire rake links on DEFAULT plane (Through) ---
+            # RAKELINK mode
             else:
-                # For rake link view, plot all on Through plane for unified view
-                # Or optionally color-code by majority line type but keep same z
-                z_base = z_positions[Line.THROUGH]  # Default to Through plane
+                # Check if this rake cycle passes the rake link filters
+                if not rc.render:
+                    continue
+
+                if self.query.type == FilterType.STATION:
+                    mode = "markers"
+                elif self.query.type ==FilterType.RAKELINK:
+                    mode = "lines+markers"
                 
-                # Count line types for coloring/info
-                through_count = sum(1 for svc in rc.servicePath if svc.line == Line.THROUGH)
-                local_count = len(rc.servicePath) - through_count
-                majority_line = Line.THROUGH if through_count >= local_count else Line.LOCAL
-                
-                mode = "markers" if self.query.type == FilterType.STATION else "lines+markers"
+                # Aggregate all services in the rake cycle into a single trace
                 x, y, z, stationLabels = [], [], [], []
 
                 for svc in rc.servicePath:
                     if not svc.render:
                         continue
+                    # In rake link mode, we render all services in a visible rake cycle
                     for ev in svc.events:
                         if not ev.atTime or not ev.atStation:
                             continue
+
                         if not ev.render:
                             continue
                             
                         minutes = ev.atTime
+                        # print(minutes)
+
                         stName = str(ev.atStation).strip().upper()
                         if stName not in stationToY:
                             continue
 
                         x.append(minutes)
                         y.append(stationToY[stName])
-                        z.append(z_base)  # All on same plane for rake link view
+                        z.append(z_offset)
                         stationLabels.append(stName)
                 
+                # Create single trace for entire rake cycle
                 if x:
                     color = "rgba(66,133,244,0.8)" if rc.rake.isAC else "rgba(90,90,90,0.8)"
-                    
-                    # Add line mix info to hover text
-                    line_mix = f"{through_count}T/{local_count}L"
                     
                     all_traces.append(
                         go.Scatter3d(
@@ -2372,55 +2449,35 @@ html.Div(
                             mode=mode,
                             line=dict(color=color),
                             marker=dict(size=2, color=color),
+                            # customdata=[{"link": rc.linkName} for _ in x],
                             hovertext=[
-                                f"{rc.linkName} ({line_mix}): {st} @ {(int(xx)//60) % 24:02d}:{int(xx%60):02d}"
+                                f"{rc.linkName}: {st} @ {(int(xx)//60) % 24:02d}:{int(xx%60):02d}"
                                 for xx, st in zip(x, stationLabels)
                             ],
+
                             hoverinfo="text",
-                            name=f"{rc.linkName}",
+                            name=rc.linkName,
                             visible=True,
                         )
                     )
+                    z_labels.append((z_offset, rc.linkName))
+                    z_offset += 40  # increment z for next rakecycle
         
-        # Determine x-axis range based on actual data
-        if not all_traces:
-            x_start, x_end = 165, 1605
+        if self.query.inTimePeriod and (self.query.type == FilterType.SERVICE or 
+                                        self.query.type == FilterType.STATION):
+            x_start, x_end = self.query.inTimePeriod
+            x_end += 90 # padding
         else:
-            # Find min and max x across all traces
-            all_x = []
-            for trace in all_traces:
-                if trace.x is not None:
-                    all_x.extend(trace.x)
-            x_start = min(all_x) if all_x else 165
-            x_end = max(all_x) if all_x else 1605
-            
-        padding = 60
-        x_start = max(0, x_start - padding)
-        x_end = x_end + padding
+            x_start, x_end  = 165, 1605
+        # padding = 120  # 120 minutes
+        # x_end = (x_end + padding)
+        # x_start = max(0, x_start - padding)
 
-        tickPositions = list(range(int(x_start), int(x_end) + 1, 120))
+        tickPositions = list(range(x_start, x_end + 1, 120))
         tickLabels = [f"{(t // 60) % 24:02d}:{int(t % 60):02d}" for t in tickPositions]
 
         yTickVals = list(stationToY.values())
         yTickText = list(stationToY.keys())
-        
-        # Z-axis configuration
-        if is_service_filter:
-            # In service mode, show Through/Local labels
-            z_tickvals = list(z_positions.values())
-            z_ticktext = [line_type.value.capitalize() for line_type in z_positions.keys()]
-            z_title = "Line Type"
-            # Set z-range to include both Through and Local planes
-            z_min = min(z_tickvals) - 20
-            z_max = max(z_tickvals) + 20
-        else:
-            # In rake link mode, keep single plane
-            z_tickvals = [z_positions[Line.THROUGH]]
-            z_ticktext = ["Rake Links"]
-            z_title = ""
-            # Keep tight z-range around single plane
-            z_min = z_positions[Line.THROUGH] - 5
-            z_max = z_positions[Line.THROUGH] + 5
 
         fig = go.Figure(data=all_traces)
 
@@ -2447,10 +2504,9 @@ html.Div(
                 zaxis=dict(
                     showgrid=True,
                     showspikes=False,
-                    title=z_title,
-                    tickvals=z_tickvals,
-                    ticktext=z_ticktext,
-                    range=[z_min, z_max],
+                    title="Service" if is_service_filter else "Rake Cycle",
+                    tickvals=[zv for zv, _ in z_labels],
+                    ticktext=[zl for _, zl in z_labels],
                 ),
                 camera=dict(
                     eye=dict(x=0, y=0, z=2.5),
@@ -2458,51 +2514,14 @@ html.Div(
                     center=dict(x=0, y=0, z=0)
                 ),
                 aspectmode="manual",
-                aspectratio=dict(x=2.8, y=1.2, z=0.8)
+                aspectratio=dict(x=2.8, y=1.2, z=1.2)
             ),
             scene_camera_projection_type="orthographic",
             width=1300,
             height=700,
             margin=dict(t=0, l=5, b=5, r=5),
-            autosize=True,
-
-            updatemenus=[
-                        dict(
-                            type="buttons",
-                            direction="left",
-                            buttons=[
-                                dict(
-                                    args=[{"scene.camera": dict(eye=dict(x=0, y=0, z=2.5),
-                                                                up=dict(x=0, y=1, z=0),
-                                                                center=dict(x=0, y=0, z=0))}],
-                                    label="Side View",
-                                    method="update"
-                                ),
-                                dict(
-                                    args=[{"scene.camera": dict(eye=dict(x=0, y=2.5, z=0.1),
-                                                                up=dict(x=0, y=0, z=1),
-                                                                center=dict(x=0, y=0, z=0))}],
-                                    label="Top View",
-                                    method="update"
-                                ),
-                                dict(
-                                    args=[{"scene.camera": dict(eye=dict(x=1.5, y=1.5, z=1.5),
-                                                                up=dict(x=0, y=0, z=1),
-                                                                center=dict(x=0, y=0, z=0))}],
-                                    label="3D View",
-                                    method="update"
-                                )
-                            ],
-                            pad={"r": 10, "t": 10},
-                            showactive=True,
-                            x=0.05,
-                            xanchor="left",
-                            y=0.05,
-                            yanchor="bottom"
-                        )
-                    ]
+            autosize=True
         )
-
 
         return fig
 
