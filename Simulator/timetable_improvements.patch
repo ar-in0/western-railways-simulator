@@ -1,0 +1,244 @@
+--- a/timetable.py
++++ b/timetable.py
+@@ -24,6 +24,7 @@ SERVICE_ID_LEN = 5
+ 
+ 
+ 
++
+ class TimeTable:
+     def __init__(self):
+         # ground truth
+@@ -54,6 +55,11 @@ class TimeTable:
+         self.allCyclesWtt = [] # from wtt linked follow
+         self.conflictingLinks = []
+     
++    @property
++    def allServices(self):
++        """All services (up + down)"""
++        return self.upServices + self.downServices
++    
+     # def generateRakeCyclePath(self, rakecycle):
+     #     # Rakecycle contains the serviceIDs of a rake-link.
+     #     # We simply find those services, get the stationpath with 
+@@ -349,16 +355,7 @@ class Service:
+                 stName= sheet.iat[rowIdx, 0]
+                 # # print(stName)
+                 # this can be made better
+-                if pd.isna(stName) or not str(stName).strip():
+-                    # check row above
+-                    stName = sheet.iat[rowIdx - 1, 0]
+-                    if pd.isna(stName) or not str(stName).strip():
+-                        stName = sheet.iat[rowIdx - 2, 0]
+-                # stName = str(self.stationCol.iloc[rowIdx]).strip().upper()
+-                if str(stName).strip() == "M'BAI CENTRAL (L)":
+-                    # hack special case. 
+-                    # make names identical in wtt is the right solution
+-                    stName = "M'BAI CENTRAL(L)" 
++                stName = TimeTableParser.normalizeStationName(TimeTableParser.getStationNameFromSheet(sheet, rowIdx))
+                 if str(stName).strip().upper() == "KANDIVLI":
+                     # hack special case. 
+                     # make names identical in wtt is the right solution
+@@ -380,11 +377,7 @@ class Service:
+                 elif "REVERSED" in str(stName).upper():
+                     # The timing in the reversed as belongs to the last station with
+                     # a valid time, not the station above
+-                    # print("reversal")
+-                    # check row above
+-                    stName= sheet.iat[rowIdx - 1, 0]
+-                    if pd.isna(stName) or not str(stName).strip():
+-                        stName = sheet.iat[rowIdx - 2, 0]
++                    stName = TimeTableParser.getStationNameFromSheet(sheet, rowIdx)
+                     
+                     stName = self.events[-1].atStation
+                 
+@@ -578,7 +571,7 @@ class TimeTableParser:
+     
+     def isolateSuburbanServices(self):
+         suburbanIds = set()
+-        # print("Updating suburban")
++        logger.debug("Updating suburban service list")
+         seen, repeated = set(), set()
+         for rc in self.wtt.rakecycles:
+             # print(rc.serviceIds)
+@@ -589,7 +582,7 @@ class TimeTableParser:
+         # print(repeated)
+         
+         suburbanServices = []
+-        for s in (self.wtt.upServices + self.wtt.downServices):
++        for s in self.wtt.allServices:
+             if any(sid in suburbanIds for sid in s.serviceId):
+                 suburbanServices.append(s)
+ 
+@@ -598,7 +591,7 @@ class TimeTableParser:
+ 
+     # timetable.py -> class TimeTableParser
+     def parseRakeLinks(self, sheet):
+-        allServices = self.wtt.upServices + self.wtt.downServices
++        allServices = self.wtt.allServices
+         sheet = sheet.reset_index(drop=True)
+ 
+         for i in range(len(sheet)):
+@@ -685,6 +678,27 @@ class TimeTableParser:
+         
+         self.upSheet = TimeTableParser.wttSheets[0]
+         self.downSheet = TimeTableParser.wttSheets[1]
++
++    @staticmethod
++    def normalizeStationName(name):
++        """Normalize station names to match internal representation"""
++        if not name or pd.isna(name):
++            return None
++        name = str(name).strip().upper()
++        
++        # Apply all normalization rules in one place
++        normalizations = {
++            "M'BAI CENTRAL (L)": "M'BAI CENTRAL(L)",
++            "KANDIVLI": "KANDIVALI"
++        }
++        return normalizations.get(name, name)
++    
++    @staticmethod
++    def getStationNameFromSheet(sheet, rowIdx, lookback=2):
++        """Get station name from row, looking back up to lookback rows if needed"""
++        for offset in range(lookback + 1):
++            if rowIdx - offset < 0:
++                break
++            stName = sheet.iat[rowIdx - offset, 0]
++            if not pd.isna(stName) and str(stName).strip():
++                return stName
++        return None
+     
+     # always use cleancol before working with a column
+     def cleanCol(self, sheet, colIdx):
+@@ -735,30 +749,15 @@ class TimeTableParser:
+     def extractInitStation(self, serviceCol, sheet):
+         '''Determines the first arrival station in the service path.
+         serviceCol: pandas.Series
+         sheet: pandas.Dataframe'''
+-        # # print(serviceCol)
+-
+-        # for every column:
+-        # stop at the first time string
+-        # in that row, look leftwards for a station name.
+-        # also check for A, D
+-        # if station name found, that station is the init station.
+-        ## if name in self.wtt.stations.keys(): its a starting time
+         stationName = None
+         for rowIdx, cell in serviceCol.items():
+-            if TimeTableParser.rTimePattern.match(cell):
+-                stationName = sheet.iat[rowIdx, 0]
+-                # row = sheet.iloc[rowIdx, :].astype(str)
+-                # stationName = row.iloc[0]
+-                # # print(f"{stationName}: {cell}")
+-
+-                if pd.isna(stationName) or not str(stationName).strip():
+-                    # check row above if possible
+-                    if rowIdx > 0:
+-                        stationName = sheet.iat[rowIdx - 1, 0]
++            time_match = TimeTableParser.rTimePattern.match(cell)
++            if time_match:
++                stationName = TimeTableParser.getStationNameFromSheet(sheet, rowIdx)
+                 break
+ 
+         if pd.isna(stationName) or not str(stationName).strip():
+             raise ValueError(f"Invalid station name near row {rowIdx}")
+         
+-        # # print(self.wtt.stations.keys())
+-        if stationName == "M'BAI CENTRAL (L)":
+-            # hack special case. 
+-            # make names identical in wtt is the right solution
+-            stationName = "M'BAI CENTRAL(L)" 
+-        
+-        if stationName.upper() == "KANDIVLI":
+-            stationName = "KANDIVALI"
+-
+-        station = self.wtt.stations[stationName.strip().upper()]
++        stationName = TimeTableParser.normalizeStationName(stationName)
++        station = self.wtt.stations[stationName]
+         assert(station)
+         return station
+         
+@@ -799,27 +789,15 @@ class TimeTableParser:
+             # use the station with last mentioned timing
+             for rowIdx in reversed(serviceCol.index):
+                 cell = str(serviceCol.iloc[rowIdx]).strip()
+-                if TimeTableParser.rTimePattern.match(cell):
+-                    stName= sheet.iat[rowIdx, 0]
+-                    # # print(stName)
+-                    # this can be made better
+-                    if pd.isna(stName) or not str(stName).strip():
+-                        # check row above
+-                        stName = sheet.iat[rowIdx - 1, 0]
+-                        if pd.isna(stName) or not str(stName).strip():
+-                            stName = sheet.iat[rowIdx - 2, 0]
+-                    # stName = str(self.stationCol.iloc[rowIdx]).strip().upper()
+-                    if str(stName).strip() == "M'BAI CENTRAL (L)":
+-                        # hack special case. 
+-                        # make names identical in wtt is the right solution
+-                        stName = "M'BAI CENTRAL(L)" 
+-                    if str(stName).strip().upper() == "KANDIVLI":
+-                        # hack special case. 
+-                        # make names identical in wtt is the right solution
+-                        stName = "KANDIVALI" 
+-                    if str(stName).strip() in self.wtt.stations.keys():
+-                        station = self.wtt.stations[str(stName).strip()]
+-                        # print(f"Last station from time: {str(stName).strip()}")
++                time_match = TimeTableParser.rTimePattern.match(cell)
++                if time_match:
++                    stName = TimeTableParser.getStationNameFromSheet(sheet, rowIdx)
++                    stName = TimeTableParser.normalizeStationName(stName)
++                    
++                    if stName in self.wtt.stations.keys():
++                        station = self.wtt.stations[stName]
+                         return station
+                     elif "REVERSED" in str(stName).upper():
+-                        # # print("reversal")
+-                        # check row above
+-                        stName= sheet.iat[rowIdx - 1, 0]
+-                        if pd.isna(stName) or not str(stName).strip():
+-                            stName = sheet.iat[rowIdx - 2, 0]
+-                        station = self.wtt.stations[str(stName).strip()]
+-                        # print(f"Last station from time,: {str(stName).strip()}")
++                        stName = TimeTableParser.getStationNameFromSheet(sheet, rowIdx)
++                        stName = TimeTableParser.normalizeStationName(stName)
++                        station = self.wtt.stations[stName]
+                         return station
+ 
+-            # print("Could not determine final station (no ARRL or valid time)")
++            logger.warning("Could not determine final station (no ARRL or valid time)")
+             return station
+         
+@@ -897,7 +862,7 @@ class TimeTableParser:
+         # check for an ADAD column
+         vals = clean.dropna().astype(str).str.strip().str.upper().tolist()
+         isADAD = any(a == "A" and b == "D" for a, b in zip(vals, vals[1:]))
+-        if(isADAD):
++        if isADAD:
+             # print("adad column, skip") # ideally eliminate from the sheet before
+             continue
+             
+@@ -935,7 +900,7 @@ class TimeTableParser:
+     # Regular service columns, we parse:
+     # - Stations with arrival and departures.
+     def registerServices(self):
+         '''Enumerate every possible service, extract arrival-departure timings. Populate
+         the Station events. For now, store up and down services seperately
+         '''
+-        UP_TT_COLUMNS = 949 # with uniform row indexing, last = 91024
+         upSheet = self.upSheet
+-        self.doRegisterServices(upSheet, Direction.UP, UP_TT_COLUMNS)
++        self.doRegisterServices(upSheet, Direction.UP, 949)
+         
+ 
+-        # print("Now register down services")
+         downSheet = self.downSheet
+-        DOWN_TT_COLUMNS = 982 # with uniform row indexing, last = 91055
+-        self.doRegisterServices(downSheet, Direction.DOWN, DOWN_TT_COLUMNS)
+-        # print("Down services registered")
++        self.doRegisterServices(downSheet, Direction.DOWN, 982)
+ 
+-        # # print(len(TimeTableParser.rakeLinkNames))
+-        # # print("AL" in TimeTableParser.rakeLinkNames)
+ 
+         
+ if __name__ == "__main__":

@@ -295,10 +295,15 @@ class TimeTable:
         # not have events. 
         for rc in self.rakecycles:
             # print(rc.servicePath)
+            sPath = [svc.serviceId[0] for svc in rc.servicePath]
+            print(f"{rc.linkName}: {sPath}")
+            rcRawServiceCols = []
             if not rc.servicePath:
                 # print(rc)
                 pass
             for svc in rc.servicePath:
+                # print(svc.rawServiceCol)
+                rcRawServiceCols.append(svc.rawServiceCol)
                 svc.generateStationEvents()
                 assert(svc.events)
                 svc.initStation = self.stations[svc.events[0].atStation]   
@@ -307,8 +312,15 @@ class TimeTable:
                 # calculate service distance
                 svc.computeLengthKm()
                 rc.lengthKm += svc.lengthKm
-            print(f"Length of {rc.linkName} = {rc.lengthKm} Km")
-
+                svc.computeDurationMinutes()
+                rc.durationMinutes += svc.durationMinutes
+            # print(f"Length of {rc.linkName} = {rc.lengthKm} Km")
+            # print(rcRawServiceCols)
+            print("\n")
+            print(f"**Count = {len(sPath)}**")
+            df = pd.DataFrame(rcRawServiceCols).T
+            print(df.to_string())
+            print("\n\n\n")
         # assign rakes to rakecycles
         self.assignRakes()
 
@@ -411,7 +423,7 @@ class RakeCycle:
 
         self.render = True # render each rakecycle
         self.lengthKm = 0 # updated during generatecycles
-
+        self.durationMinutes = 0
     
     def __repr__(self):
         rake_str = self.rake.rakeId if self.rake else 'Unassigned'
@@ -500,7 +512,12 @@ class Service:
         self.render = True
         
         # self.name = None
-    
+        self.durationMinutes = 0
+
+
+    def computeDurationMinutes(self):
+        self.durationMinutes = self.events[-1].atTime - self.events[0].atTime
+
     def checkStartStationConstraint(self, qq):
         if not qq.startStation:
             return
@@ -1414,8 +1431,8 @@ class TimeTableParser:
 
         
 if __name__ == "__main__":
-    wttPath = "/home/armaan/Fun-CS/IITB-RAILWAYS-2025/railways-simulator-IITB/SWTT-78_ADDITIONAL_AC_SERVICES_27_NOV_2024-1.xlsx"
-    wttSummaryPath = "/home/armaan/Fun-CS/IITB-RAILWAYS-2025/railways-simulator-IITB/LINK_SWTT_78_UPDATED_05.11.2024-4.xlsx"
+    wttPath = "/home/armaan/Fun-CS/IITB-RAILWAYS-2025/western-railways-simulator/SWTT-78_ADDITIONAL_AC_SERVICES_27_NOV_2024-1.xlsx"
+    wttSummaryPath = "/home/armaan/Fun-CS/IITB-RAILWAYS-2025/western-railways-simulator/LINK_SWTT_78_UPDATED_05.11.2024-4.xlsx"
     parsed = TimeTableParser(wttPath, wttSummaryPath)
 
     parsed.wtt.generateRakeCycles()
