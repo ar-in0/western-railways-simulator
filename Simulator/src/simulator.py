@@ -1,6 +1,7 @@
 import timetable as tt
 import dash
 import pandas as pd
+
 # from dash import Dash, html, dcc, Input, Output, State, callback_context
 # import dash_bootstrap_components as dbc
 import io
@@ -20,6 +21,7 @@ from timetable import Line
 from ui import *
 from enum import Enum
 
+
 def fmt_time(t):
     """Format time in minutes to HH:MM string"""
     if t is None:
@@ -27,22 +29,23 @@ def fmt_time(t):
     t = int(round(t))
     return f"{t//60:02d}:{t%60:02d}"
 
+
 class FilterType(Enum):
-    RAKELINK = 'rakelink'
-    SERVICE = 'service'
-    STATION = 'station'
+    RAKELINK = "rakelink"
+    SERVICE = "service"
+    STATION = "station"
 
 
 @dataclass
 class FilterQuery:
     type: Optional[FilterType] = None
-    
+
     # Make fields mode-specific (no properties needed)
     startStation: Optional[str] = None
     endStation: Optional[str] = None
     passingThrough: List[str] = field(default_factory=list)
     inTimePeriod: Optional[Tuple[int, int]] = (165, 1605)
-    
+
     ac: Optional[bool] = None
     inDirection: Optional[List[str]] = None
     selectedLinks: List[str] = field(default_factory=list)
@@ -70,7 +73,7 @@ class Simulator:
         self.filterStates = {
             FilterType.RAKELINK: {},
             FilterType.SERVICE: {},
-            FilterType.STATION: {}
+            FilterType.STATION: {},
         }
 
     def build_query_info_panel(self):
@@ -80,17 +83,18 @@ class Simulator:
             return self.build_service_query_info()
         else:
             return html.Div("No query context available.")
-    
+
     def build_service_query_info(self):
         if not self.query.selectedServices:
             return html.Div("No services selected.")
-        
+
         # Find selected service objects
         selected_svcs = [
-            svc for svc in self.parser.wtt.suburbanServices
+            svc
+            for svc in self.parser.wtt.suburbanServices
             if any(str(sid) in self.query.selectedServices for sid in svc.serviceId)
         ]
-        
+
         return html.Div(
             [
                 html.Div(
@@ -99,32 +103,36 @@ class Simulator:
                         "fontSize": "13px",
                         "fontWeight": "600",
                         "color": "#475569",
-                        "marginBottom": "6px"
-                    }
+                        "marginBottom": "6px",
+                    },
                 ),
-                *[self.build_service_detail_block(svc) for svc in selected_svcs]
+                *[self.build_service_detail_block(svc) for svc in selected_svcs],
             ],
-            style={"padding": "8px"}
+            style={"padding": "8px"},
         )
 
     def build_service_detail_block(self, svc):
-        svc_id_str = ','.join(str(sid) for sid in svc.serviceId)
-        
+        svc_id_str = ",".join(str(sid) for sid in svc.serviceId)
+
         return html.Div(
             [
                 html.Div(
                     f"Service {svc_id_str}",
-                    style={"fontWeight": "600", "marginBottom": "4px"}
+                    style={"fontWeight": "600", "marginBottom": "4px"},
                 ),
                 html.Div(
                     f"{svc.direction.name} | {svc.initStation.name} → {svc.finalStation.name}",
-                    style={"fontSize": "12px", "color": "#64748b"}
+                    style={"fontSize": "12px", "color": "#64748b"},
                 ),
                 html.Div(
                     f"{'AC' if svc.needsACRake else 'Non-AC'} | {svc.rakeSizeReq}-car | {len(svc.events)} stops",
-                    style={"fontSize": "12px", "color": "#64748b", "marginBottom": "8px"}
+                    style={
+                        "fontSize": "12px",
+                        "color": "#64748b",
+                        "marginBottom": "8px",
+                    },
                 ),
-                html.Hr(style={"margin": "8px 0"})
+                html.Hr(style={"margin": "8px 0"}),
             ]
         )
 
@@ -133,7 +141,8 @@ class Simulator:
             return html.Div("No rake links selected.")
 
         selected_rcs = [
-            rc for rc in self.parser.wtt.rakecycles
+            rc
+            for rc in self.parser.wtt.rakecycles
             if rc.linkName in self.query.selectedLinks
         ]
 
@@ -145,12 +154,12 @@ class Simulator:
                         "fontSize": "13px",
                         "fontWeight": "600",
                         "color": "#475569",
-                        "marginBottom": "6px"
-                    }
+                        "marginBottom": "6px",
+                    },
                 ),
-                *[self.build_rake_path_block(rc) for rc in selected_rcs]
+                *[self.build_rake_path_block(rc) for rc in selected_rcs],
             ],
-            style={"padding": "8px"}
+            style={"padding": "8px"},
         )
 
     def build_rake_path_block(self, rc):
@@ -166,49 +175,45 @@ class Simulator:
             [
                 html.Summary(
                     [
-                        html.Span(
-                            f"Rake {rc.linkName}",
-                            style={"fontWeight": "600"}
-                        ),
+                        html.Span(f"Rake {rc.linkName}", style={"fontWeight": "600"}),
                         html.Span(
                             f"  · {len(services)} services ·  ",
-                            style={"color": "#64748b"}
+                            style={"color": "#64748b"},
                         ),
-                        html.Span(
-                            f"{start} → {end}"
-                        ),
+                        html.Span(f"{start} → {end}"),
                         html.Span(
                             f"  {'AC' if ac == len(services) else 'Non-AC' if ac == 0 else 'Mixed AC'}",
-                            style={"marginLeft": "6px", "color": "#475569"}
+                            style={"marginLeft": "6px", "color": "#475569"},
                         ),
                     ],
                     style={
                         "cursor": "pointer",
                         "fontSize": "13px",
-                        "lineHeight": "1.4"
-                    }
+                        "lineHeight": "1.4",
+                    },
                 ),
-
                 html.Div(
-                    [self.build_service_row(svc, i < n - 1)
-                    for i, svc in enumerate(services)],
-                    style={"marginLeft": "14px", "marginTop": "6px"}
-                )
+                    [
+                        build_service_row(svc, i < n - 1)
+                        for i, svc in enumerate(services)
+                    ],
+                    style={"marginLeft": "14px", "marginTop": "6px"},
+                ),
             ]
         )
-
-
 
     def build_minimal_rake_block(self, rc):
         rows = []
         for i, svc in enumerate(rc.servicePath, start=1):
-            rows.append({
-                "seq": i,
-                "service_id": ", ".join(str(s) for s in svc.serviceId),
-                "start": svc.initStation.name,
-                "end": svc.finalStation.name,
-                "ac": "AC" if svc.needsACRake else "Non-AC",
-            })
+            rows.append(
+                {
+                    "seq": i,
+                    "service_id": ", ".join(str(s) for s in svc.serviceId),
+                    "start": svc.initStation.name,
+                    "end": svc.finalStation.name,
+                    "ac": "AC" if svc.needsACRake else "Non-AC",
+                }
+            )
 
         return html.Div(
             [
@@ -218,9 +223,8 @@ class Simulator:
                     f"{rc.rake.rakeSize} cars | "
                     f"{rc.lengthKm:.1f} km | "
                     f"{len(rc.servicePath)} services",
-                    style={"fontWeight": "600", "marginBottom": "4px"}
+                    style={"fontWeight": "600", "marginBottom": "4px"},
                 ),
-
                 dash_table.DataTable(
                     columns=[
                         {"name": "#", "id": "seq"},
@@ -234,8 +238,7 @@ class Simulator:
                     style_table={"maxHeight": "200px", "overflowY": "auto"},
                     style_cell={"fontSize": "12px", "padding": "4px"},
                 ),
-
-                html.Hr()
+                html.Hr(),
             ]
         )
 
@@ -265,70 +268,76 @@ class Simulator:
 
         fig.update_layout(
             scene_camera=dict(eye=dict(x=0, y=0, z=1.5)),
-            scene=dict(aspectratio=dict(x=3, y=1.5, z=1.2))
+            scene=dict(aspectratio=dict(x=3, y=1.5, z=1.2)),
         )
 
         for i, rc in enumerate(self.parser.wtt.rakecycles):
             for svc in rc.servicePath:
-                if i < len(self.parser.wtt.rakecycles)/2 + 10:
+                if i < len(self.parser.wtt.rakecycles) / 2 + 10:
                     svc.needsACRake = True
 
-        before = utils.corridorMixingMinimal(qq.startStation, qq.endStation, qq.inTimePeriod[0], qq.inTimePeriod[1])
-        after = utils.corridorMixingMinimal(qq.startStation, qq.endStation, qq.inTimePeriod[0], qq.inTimePeriod[1])
+        before = utils.corridorMixingMinimal(
+            qq.startStation, qq.endStation, qq.inTimePeriod[0], qq.inTimePeriod[1]
+        )
+        after = utils.corridorMixingMinimal(
+            qq.startStation, qq.endStation, qq.inTimePeriod[0], qq.inTimePeriod[1]
+        )
 
         print("=== Mixing Report ===")
         for b, a in zip(before, after):
             print(f"{b['station']}: {b['mixing_score']:.3f} -> {a['mixing_score']:.3f}")
 
         return fig
-    
+
     def _reset_isolation(self, fig):
         for rc in self.parser.wtt.rakecycles:
             rc.render = True
         fig.update_layout(annotations=[])
         for tr in fig.data:
             tr.opacity = 1.0
-            if hasattr(tr, "line"): tr.line.width = 2
-            if hasattr(tr, "marker"): tr.marker.size = 2
+            if hasattr(tr, "line"):
+                tr.line.width = 2
+            if hasattr(tr, "marker"):
+                tr.marker.size = 2
         return fig
 
     def _highlight_clicked_services(self, fig, selected_services):
         """
         Highlight selected services in the visualization.
-        
+
         Args:
             fig: Plotly figure object
             selected_services: List of service ID strings (e.g., ["93001", "93002"])
         """
         if not selected_services:
             return
-        
+
         selected_set = set(selected_services)
-        
+
         for trace in fig.data:
             # Trace names in service mode are "LinkName-ServiceID"
             # e.g., "A-93001"
-            if '-' in trace.name:
-                trace_service = trace.name.split('-')[1]  # Extract service ID
-                
+            if "-" in trace.name:
+                trace_service = trace.name.split("-")[1]  # Extract service ID
+
                 if trace_service in selected_set:
                     # Highlight
                     trace.opacity = 1.0
-                    if hasattr(trace, "marker"): 
+                    if hasattr(trace, "marker"):
                         trace.marker.size = 3
                 else:
                     # Dim
                     trace.opacity = 0.35
-                    if hasattr(trace, "marker"): 
+                    if hasattr(trace, "marker"):
                         trace.marker.size = 1
             else:
                 # Not a service trace (maybe context traces), dim by default
                 trace.opacity = 0.35
-    
+
     def _highlight_clicked(self, fig, selected_links):
         """
         Highlight one or more rake links in the visualization.
-        
+
         Args:
             fig: Plotly figure object
             selected_links: Either a string (single link) or list of strings (multiple links)
@@ -336,43 +345,45 @@ class Simulator:
         # Normalize to list for uniform handling
         if isinstance(selected_links, str):
             selected_links = [selected_links]
-        
+
         if not selected_links:
             # # No selection - reset all to normal
             # for trace in fig.data:
             #     trace.opacity = 1.0
-            #     if hasattr(trace, "line"): 
+            #     if hasattr(trace, "line"):
             #         trace.line.width = 2
-            #     if hasattr(trace, "marker"): 
+            #     if hasattr(trace, "marker"):
             #         trace.marker.size = 2
             return
-        
+
         selected_set = set(selected_links)
-        
+
         for trace in fig.data:
             # Extract base link name (handle "A" or "A-93001" format)
-            trace_link = trace.name.split('-')[0] if '-' in trace.name else trace.name
-            
+            trace_link = trace.name.split("-")[0] if "-" in trace.name else trace.name
+
             if trace_link in selected_set:
                 # Highlight selected traces
                 trace.opacity = 1.0
-                # if hasattr(trace, "line"): 
+                # if hasattr(trace, "line"):
                 #     trace.line.width = 4  # Thicker than default
-                if hasattr(trace, "marker"): 
+                if hasattr(trace, "marker"):
                     trace.marker.size = 3  # Larger than default
             else:
                 # Dim unselected traces
                 trace.opacity = 0.35
-                # if hasattr(trace, "line"): 
+                # if hasattr(trace, "line"):
                 #     trace.line.width = 2
-                if hasattr(trace, "marker"): 
+                if hasattr(trace, "marker"):
                     trace.marker.size = 1
 
     def _build_annotation(self, rc):
         return [
             dict(
-                x=0.02, y=0.97,
-                xref="paper", yref="paper",
+                x=0.02,
+                y=0.97,
+                xref="paper",
+                yref="paper",
                 showarrow=False,
                 align="left",
                 bgcolor="rgba(0,0,0,0.75)",
@@ -387,161 +398,169 @@ class Simulator:
                     f"End: {rc.servicePath[-1].finalStation.name}<br>"
                     f"Distance: {int(rc.lengthKm)} km<br>"
                     f"Rake: {'AC' if rc.rake.isAC else 'Non-AC'} ({rc.rake.rakeSize}-car)<br>"
-                )
+                ),
             )
         ]
-    
 
     def convertRakeLinksToAC(self, link_names):
         """
         Convert specified rake links to AC.
         Updates both Rake and Service objects.
-        
+
         Args:
             link_names: List of rake link names (e.g., ['A', 'B'])
-        
+
         Returns:
             dict with conversion summary
         """
         if not link_names:
             return {"converted": 0, "links": []}
-        
+
         converted = []
-        
+
         for rc in self.parser.wtt.rakecycles:
             if rc.linkName in link_names:
                 # Skip if already AC
                 if rc.rake and rc.rake.isAC:
                     continue
-                
+
                 # Convert the rake
                 if rc.rake:
                     rc.rake.isAC = True
-                
+
                 # Convert all services in this rake cycle
                 for svc in rc.servicePath:
                     svc.needsACRake = True
-                
+
                 converted.append(rc.linkName)
-        
-        return {
-            "converted": len(converted),
-            "links": converted
-        }
+
+        return {"converted": len(converted), "links": converted}
 
     def initCallbacks(self):
         self._initFileUploadCallbacks()
         self._initButtonCallbacks()
-        self._initFilterQueryCallbacks() 
+        self._initFilterQueryCallbacks()
 
     def _is_valid_xlsx(self, filename):
         return bool(filename) and filename.lower().endswith(".xlsx")
 
     def _initFilterQueryCallbacks(self):
-        '''Each UI filter updates self.query attributes directly.'''
+        """Each UI filter updates self.query attributes directly."""
 
         # ---------------------------------------------------------------------
         # Helper: handles both rakelink, service and station inputs in one place
         # ---------------------------------------------------------------------
-        def _update_query_field(ctx, field, value_rakelink, value_service=None, value_station=None):
-            '''Update a FilterQuery field depending on which input triggered.'''
+        def _update_query_field(
+            ctx, field, value_rakelink, value_service=None, value_station=None
+        ):
+            """Update a FilterQuery field depending on which input triggered."""
             if not ctx.triggered:
                 return None
-            trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+            trigger = ctx.triggered[0]["prop_id"].split(".")[0]
 
             # Choose correct source
-            if trigger.endswith('_service'):
+            if trigger.endswith("_service"):
                 setattr(self.query, field, value_service)
-            elif trigger.endswith('_station'):
+            elif trigger.endswith("_station"):
                 setattr(self.query, field, value_station)
             else:
                 setattr(self.query, field, value_rakelink)
             return None
 
         @self.app.callback(
-            Input('start-station', 'value'),
-            Input('start-station_service', 'value'),
+            Input("start-station", "value"),
+            Input("start-station_service", "value"),
         )
         def update_start_station(value_rakelink, value_service):
-            return _update_query_field(callback_context, 'startStation', value_rakelink, value_service)
+            return _update_query_field(
+                callback_context, "startStation", value_rakelink, value_service
+            )
 
         @self.app.callback(
-            Input('end-station', 'value'),
-            Input('end-station_service', 'value'),
+            Input("end-station", "value"),
+            Input("end-station_service", "value"),
         )
         def update_end_station(value_rakelink, value_service):
-            return _update_query_field(callback_context, 'endStation', value_rakelink, value_service)
+            return _update_query_field(
+                callback_context, "endStation", value_rakelink, value_service
+            )
 
         @self.app.callback(
-            Input('intermediate-stations', 'value'),
-            Input('intermediate-stations_service', 'value'),
+            Input("intermediate-stations", "value"),
+            Input("intermediate-stations_service", "value"),
         )
         def update_passing_through(value_rakelink, value_service):
             v1 = value_rakelink or []
             v2 = value_service or []
-            return _update_query_field(callback_context, 'passingThrough', v1, v2)
+            return _update_query_field(callback_context, "passingThrough", v1, v2)
 
         @self.app.callback(
-            Input('time-range-slider', 'value'),
-            Input('time-range-slider_service', 'value'),
-            Input('time-range-slider_station', 'value'),
-            prevent_initial_call=False
+            Input("time-range-slider", "value"),
+            Input("time-range-slider_service", "value"),
+            Input("time-range-slider_station", "value"),
+            prevent_initial_call=False,
         )
         def update_time_period(value_rakelink, value_service, value_station):
-            return _update_query_field(callback_context, 'inTimePeriod', value_rakelink, value_service, value_station)
+            return _update_query_field(
+                callback_context,
+                "inTimePeriod",
+                value_rakelink,
+                value_service,
+                value_station,
+            )
 
         @self.app.callback(
-            Input('ac-selector', 'value'),
+            Input("ac-selector", "value"),
         )
         def update_ac_filter(value_rakelink):
-            return _update_query_field(callback_context, 'ac', value_rakelink)
+            return _update_query_field(callback_context, "ac", value_rakelink)
 
         @self.app.callback(
-            Input('direction-selector', 'value'),
+            Input("direction-selector", "value"),
         )
         def update_service_direction(value):
             self.query.inDirection = value
             return None
 
         @self.app.callback(
-            Input('filter-tabs', 'active_tab'),
-            State('time-range-slider', 'value'),
-            State('time-range-slider_service', 'value'),
-            State('time-range-slider_station', 'value'),
+            Input("filter-tabs", "active_tab"),
+            State("time-range-slider", "value"),
+            State("time-range-slider_service", "value"),
+            State("time-range-slider_station", "value"),
         )
         def update_query_type(active_tab, rk_time, svc_time, st_time):
             # Update filter type
             if active_tab == "tab-rakelink":
                 self.query.type = FilterType.RAKELINK
-                self.query.inTimePeriod = rk_time          # ← RESET TIME
+                self.query.inTimePeriod = rk_time  # ← RESET TIME
                 self.query.inDirection = None
 
             elif active_tab == "tab-service":
                 self.query.type = FilterType.SERVICE
-                self.query.inTimePeriod = svc_time         # ← RESET TIME
+                self.query.inTimePeriod = svc_time  # ← RESET TIME
 
             elif active_tab == "tab-station":
                 self.query.type = FilterType.STATION
-                self.query.inTimePeriod = st_time          # ← RESET TIME
+                self.query.inTimePeriod = st_time  # ← RESET TIME
 
             return None
 
         @self.app.callback(
-            Output('app-state', 'data', allow_duplicate=True),
-            Input('filter-tabs', 'active_tab'),
-            prevent_initial_call=True 
+            Output("app-state", "data", allow_duplicate=True),
+            Input("filter-tabs", "active_tab"),
+            prevent_initial_call=True,
         )
         def update_query_type(active_tab):
             # Save current filter state
             if self.query.type:
                 self.filterStates[self.query.type] = {
-                    'startStation': self.query.startStation,
-                    'endStation': self.query.endStation,
-                    'passingThrough': self.query.passingThrough.copy(),
-                    'inTimePeriod': self.query.inTimePeriod,
-                    'inDirection': self.query.inDirection,
+                    "startStation": self.query.startStation,
+                    "endStation": self.query.endStation,
+                    "passingThrough": self.query.passingThrough.copy(),
+                    "inTimePeriod": self.query.inTimePeriod,
+                    "inDirection": self.query.inDirection,
                 }
-            
+
             # Update type
             if active_tab == "tab-rakelink":
                 self.query.type = FilterType.RAKELINK
@@ -549,24 +568,25 @@ class Simulator:
                 self.query.type = FilterType.SERVICE
             elif active_tab == "tab-station":
                 self.query.type = FilterType.STATION
-            
+
             # Restore saved state for new tab
             saved = self.filterStates.get(self.query.type, {})
-            self.query.startStation = saved.get('startStation')
-            self.query.endStation = saved.get('endStation')
-            self.query.passingThrough = saved.get('passingThrough', [])
-            self.query.inTimePeriod = saved.get('inTimePeriod', (165, 1605))
-            self.query.inDirection = saved.get('inDirection')
-            
+            self.query.startStation = saved.get("startStation")
+            self.query.endStation = saved.get("endStation")
+            self.query.passingThrough = saved.get("passingThrough", [])
+            self.query.inTimePeriod = saved.get("inTimePeriod", (165, 1605))
+            self.query.inDirection = saved.get("inDirection")
+
             return None
-        
+
     def _initFileUploadCallbacks(self):
-        '''Handle file uploads and update UI'''
+        """Handle file uploads and update UI"""
+
         @self.app.callback(
-            Output('upload-wtt-inline', 'children'),
-            Output('upload-wtt-inline', 'style'),
-            Input('upload-wtt-inline', 'contents'),
-            State('upload-wtt-inline', 'filename')
+            Output("upload-wtt-inline", "children"),
+            Output("upload-wtt-inline", "style"),
+            Input("upload-wtt-inline", "contents"),
+            State("upload-wtt-inline", "filename"),
         )
         def update_wtt_filename(contents, filename):
             base_style = {
@@ -582,40 +602,85 @@ class Simulator:
                 "transition": "all 0.2s ease",
             }
             if contents is None:
-                return html.Div([
-                    html.Img(src="/assets/excel-icon.png",
-                            style={"width": "28px", "height": "28px", "marginBottom": "6px"}),
-                    html.Div("Full WTT",
-                            style={"fontWeight": "500", "color": "#334155", "fontSize": "14px"}),
-                    html.Div("Click to upload",
-                            style={"fontSize": "11px", "color": "#94a3b8", "marginTop": "4px"})
-                ], className="text-center"), base_style
+                return (
+                    html.Div(
+                        [
+                            html.Img(
+                                src="/assets/excel-icon.png",
+                                style={
+                                    "width": "28px",
+                                    "height": "28px",
+                                    "marginBottom": "6px",
+                                },
+                            ),
+                            html.Div(
+                                "Full WTT",
+                                style={
+                                    "fontWeight": "500",
+                                    "color": "#334155",
+                                    "fontSize": "14px",
+                                },
+                            ),
+                            html.Div(
+                                "Click to upload",
+                                style={
+                                    "fontSize": "11px",
+                                    "color": "#94a3b8",
+                                    "marginTop": "4px",
+                                },
+                            ),
+                        ],
+                        className="text-center",
+                    ),
+                    base_style,
+                )
 
             # When uploaded
             self.wttContents = contents
             self.wttFileName = filename
             display_name = filename if len(filename) <= 40 else filename[:37] + "..."
-            
+
             success_style = copy.deepcopy(base_style)
-            success_style.update({
-                "borderStyle": "solid",
-                "borderColor": "#188038",  # Google Sheets green
-            })
-            
-            return html.Div([
-                html.Img(src="/assets/excel-icon.png",
-                        style={"width": "24px", "height": "24px", "marginBottom": "4px"}),
-                html.Div(display_name,
-                        style={"fontSize": "11px", "color": "#188038", "fontWeight": "500", "wordBreak": "break-all"})
-            ], className="text-center"), success_style
+            success_style.update(
+                {
+                    "borderStyle": "solid",
+                    "borderColor": "#188038",  # Google Sheets green
+                }
+            )
+
+            return (
+                html.Div(
+                    [
+                        html.Img(
+                            src="/assets/excel-icon.png",
+                            style={
+                                "width": "24px",
+                                "height": "24px",
+                                "marginBottom": "4px",
+                            },
+                        ),
+                        html.Div(
+                            display_name,
+                            style={
+                                "fontSize": "11px",
+                                "color": "#188038",
+                                "fontWeight": "500",
+                                "wordBreak": "break-all",
+                            },
+                        ),
+                    ],
+                    className="text-center",
+                ),
+                success_style,
+            )
 
         @self.app.callback(
-            Output('upload-summary-inline', 'children'),
-            Output('upload-summary-inline', 'style'),
-            Input('upload-summary-inline', 'contents'),
-            State('upload-summary-inline', 'filename')
+            Output("upload-summary-inline", "children"),
+            Output("upload-summary-inline", "style"),
+            Input("upload-summary-inline", "contents"),
+            State("upload-summary-inline", "filename"),
         )
-        def update_summary_filename(contents, filename):            
+        def update_summary_filename(contents, filename):
             base_style = {
                 "height": "140px",
                 "borderWidth": "2px",
@@ -629,41 +694,88 @@ class Simulator:
                 "transition": "all 0.2s ease",
             }
             if contents is None:
-                return html.Div([
-                    html.Img(src="/assets/excel-icon.png",
-                            style={"width": "28px", "height": "28px", "marginBottom": "6px"}),
-                    html.Div("WTT Link Summary",
-                            style={"fontWeight": "500", "color": "#334155", "fontSize": "14px"}),
-                    html.Div("Click to upload",
-                            style={"fontSize": "11px", "color": "#94a3b8", "marginTop": "4px"})
-                ], className="text-center"), base_style
-            
+                return (
+                    html.Div(
+                        [
+                            html.Img(
+                                src="/assets/excel-icon.png",
+                                style={
+                                    "width": "28px",
+                                    "height": "28px",
+                                    "marginBottom": "6px",
+                                },
+                            ),
+                            html.Div(
+                                "WTT Link Summary",
+                                style={
+                                    "fontWeight": "500",
+                                    "color": "#334155",
+                                    "fontSize": "14px",
+                                },
+                            ),
+                            html.Div(
+                                "Click to upload",
+                                style={
+                                    "fontSize": "11px",
+                                    "color": "#94a3b8",
+                                    "marginTop": "4px",
+                                },
+                            ),
+                        ],
+                        className="text-center",
+                    ),
+                    base_style,
+                )
+
             self.summaryContents = contents
             self.summaryFileName = filename
             # Truncate long filenames
             display_name = filename if len(filename) <= 40 else filename[:37] + "..."
-            
+
             success_style = copy.deepcopy(base_style)
-            success_style.update({
-                "borderStyle": "solid",
-                "borderColor": "#188038",  # Google Sheets green
-            })
-            
-            return html.Div([
-                html.Img(src="/assets/excel-icon.png",
-                        style={"width": "24px", "height": "24px", "marginBottom": "4px"}),
-                html.Div(display_name,
-                        style={"fontSize": "11px", "color": "#188038", "fontWeight": "500", "wordBreak": "break-all"})
-            ], className="text-center"), success_style
+            success_style.update(
+                {
+                    "borderStyle": "solid",
+                    "borderColor": "#188038",  # Google Sheets green
+                }
+            )
+
+            return (
+                html.Div(
+                    [
+                        html.Img(
+                            src="/assets/excel-icon.png",
+                            style={
+                                "width": "24px",
+                                "height": "24px",
+                                "marginBottom": "4px",
+                            },
+                        ),
+                        html.Div(
+                            display_name,
+                            style={
+                                "fontSize": "11px",
+                                "color": "#188038",
+                                "fontWeight": "500",
+                                "wordBreak": "break-all",
+                            },
+                        ),
+                    ],
+                    className="text-center",
+                ),
+                success_style,
+            )
 
         @self.app.callback(
-            Output('generate-button', 'disabled'),
-            Output('generate-button', 'style'),
-            [Input('upload-wtt-inline', 'contents'),
-            Input('upload-summary-inline', 'contents')]
+            Output("generate-button", "disabled"),
+            Output("generate-button", "style"),
+            [
+                Input("upload-wtt-inline", "contents"),
+                Input("upload-summary-inline", "contents"),
+            ],
         )
         def enable_generate_button(wtt_contents, summary_contents):
-            '''Enable button only when both files are uploaded'''
+            """Enable button only when both files are uploaded"""
             base_style = {
                 "border": "none",
                 "width": "100%",
@@ -682,7 +794,7 @@ class Simulator:
                     # "border": "2px solid #188038",
                     # "backgroundColor": "white",
                     # "color": "#188038",
-                    "opacity":"1",
+                    "opacity": "1",
                 }
                 return False, enabled_style
             else:
@@ -698,16 +810,20 @@ class Simulator:
                 return True, disabled_style
 
         @self.app.callback(
-            [Output('start-station', 'disabled'),
-            Output('end-station', 'disabled'),
-            Output('intermediate-stations', 'disabled'),
-            Output('time-range-slider', 'disabled'),
-            Output('filter-overlay', 'style')],
-            [Input('upload-wtt-inline', 'contents'),
-            Input('upload-summary-inline', 'contents')]
+            [
+                Output("start-station", "disabled"),
+                Output("end-station", "disabled"),
+                Output("intermediate-stations", "disabled"),
+                Output("time-range-slider", "disabled"),
+                Output("filter-overlay", "style"),
+            ],
+            [
+                Input("upload-wtt-inline", "contents"),
+                Input("upload-summary-inline", "contents"),
+            ],
         )
         def toggle_filters(wtt_contents, summary_contents):
-            '''Enable filters only when both files are uploaded'''
+            """Enable filters only when both files are uploaded"""
             if wtt_contents is not None and summary_contents is not None:
                 # Both uploaded -> enable filters
                 overlay_style = {"display": "none"}
@@ -723,27 +839,29 @@ class Simulator:
                     "backgroundColor": "rgba(243, 246, 250, 0.7)",
                     "zIndex": "10",
                     "cursor": "not-allowed",
-                    "borderRadius": "12px"
+                    "borderRadius": "12px",
                 }
                 return True, True, True, True, overlay_style
-        
+
         @self.app.callback(
-            [Output('app-state', 'data'),
-            Output('start-station', 'options'),
-            Output('end-station', 'options'),
-            Output('intermediate-stations', 'options'),
-            Output('start-station_service', 'options'),
-            Output('end-station_service', 'options'),
-            Output('intermediate-stations_service', 'options')],  
-            Input('upload-wtt-inline', 'contents')
+            [
+                Output("app-state", "data"),
+                Output("start-station", "options"),
+                Output("end-station", "options"),
+                Output("intermediate-stations", "options"),
+                Output("start-station_service", "options"),
+                Output("end-station_service", "options"),
+                Output("intermediate-stations_service", "options"),
+            ],
+            Input("upload-wtt-inline", "contents"),
         )
         def initFilters(wttContents):
             if not self._is_valid_xlsx(self.wttFileName):
                 raise PreventUpdate
             if not wttContents:
-                return None,[],[],[],[],[],[] # should never reach here
-            
-            wttDecoded = base64.b64decode(wttContents.split(',')[1])
+                return None, [], [], [], [], [], []  # should never reach here
+
+            wttDecoded = base64.b64decode(wttContents.split(",")[1])
             wttIO = io.BytesIO(wttDecoded)
 
             if not self.parser:
@@ -756,13 +874,22 @@ class Simulator:
             stations = [s for s in self.parser.wtt.stations]
             options = [{"label": s, "value": s} for s in stations]
 
-            return {"initialized": True}, options, options, options, options, options, options
-
+            return (
+                {"initialized": True},
+                options,
+                options,
+                options,
+                options,
+                options,
+                options,
+            )
 
         @self.app.callback(
-            [Input('upload-wtt-inline', 'contents'),
-            Input('upload-summary-inline', 'contents')],
-            prevent_initial_call=True
+            [
+                Input("upload-wtt-inline", "contents"),
+                Input("upload-summary-inline", "contents"),
+            ],
+            prevent_initial_call=True,
         )
         def initBackend(wttContents, summaryContents):
             if wttContents is None and summaryContents is None:
@@ -773,54 +900,55 @@ class Simulator:
                 and self._is_valid_xlsx(self.summaryFileName)
             ):
                 raise PreventUpdate
-            
+
             try:
-                summaryDecoded = base64.b64decode(summaryContents.split(',')[1])
+                summaryDecoded = base64.b64decode(summaryContents.split(",")[1])
                 summaryIO = io.BytesIO(summaryDecoded)
-                
+
                 self.parser.registerServices()
                 self.parser.parseWttSummaryFromFileObj(summaryIO)
                 self.parser.wtt.suburbanServices = self.parser.isolateSuburbanServices()
-            
+
             except Exception as e:
                 print(f"Error initializing backend: {e}")
-                return 
+                return
 
-    def _initButtonCallbacks(self): 
+    def _initButtonCallbacks(self):
         @self.app.callback(
-            Output('rake-3d-graph', 'figure', allow_duplicate=True),
-            Output('rake-link-table', 'data', allow_duplicate=True),
-            Output('status-div', 'children', allow_duplicate=True),
-            Input('reset-ac-button', 'n_clicks'),
-            State('rake-3d-graph', 'figure'),
-            prevent_initial_call=True
+            Output("rake-3d-graph", "figure", allow_duplicate=True),
+            Output("rake-link-table", "data", allow_duplicate=True),
+            Output("status-div", "children", allow_duplicate=True),
+            Input("reset-ac-button", "n_clicks"),
+            State("rake-3d-graph", "figure"),
+            prevent_initial_call=True,
         )
         def reset_ac_conversions(n_clicks, current_fig):
             """Reset all AC conversions to original state from data"""
             if not n_clicks:
                 raise PreventUpdate
-            
+
             # Re-parse data to restore original state
             # You'll need to store original AC status or re-read from files
             # For now, just show message
             status_msg = html.Div(
                 "Reset functionality requires storing original state",
-                style={"padding": "8px", "color": "#f59e0b"}
+                style={"padding": "8px", "color": "#f59e0b"},
             )
-            
+
             raise PreventUpdate  # Implement full reset logic as needed
+
         @self.app.callback(
-            Output('convert-ac-button', 'disabled'),
-            Input('rake-link-table', 'selected_rows'),
+            Output("convert-ac-button", "disabled"),
+            Input("rake-link-table", "selected_rows"),
             Input("filter-tabs", "active_tab"),
-            State('rake-link-table', 'data'),
-            prevent_initial_call=True
+            State("rake-link-table", "data"),
+            prevent_initial_call=True,
         )
         def toggle_convert_button(selected_rows, active_tab, table_data):
             """Enable Convert to AC button only when non-AC links are selected in rakelink mode"""
             if active_tab != "tab-rakelink" or not selected_rows or not table_data:
                 return True
-            
+
             # Check if any selected link is non-AC
             has_nonac = False
             for idx in selected_rows:
@@ -828,114 +956,120 @@ class Simulator:
                     if table_data[idx]["is_ac"] == "Non-AC":
                         has_nonac = True
                         break
-            
+
             return not has_nonac  # Enable if we have at least one non-AC link
 
         @self.app.callback(
-            Output('rake-3d-graph', 'figure', allow_duplicate=True),
-            Output('rake-link-table', 'data', allow_duplicate=True),
-            Output('status-div', 'children', allow_duplicate=True),
-            Input('convert-ac-button', 'n_clicks'),
-            State('rake-link-table', 'selected_rows'),
-            State('rake-link-table', 'data'),
-            State('rake-3d-graph', 'figure'),
-            prevent_initial_call=True
+            Output("rake-3d-graph", "figure", allow_duplicate=True),
+            Output("rake-link-table", "data", allow_duplicate=True),
+            Output("status-div", "children", allow_duplicate=True),
+            Input("convert-ac-button", "n_clicks"),
+            State("rake-link-table", "selected_rows"),
+            State("rake-link-table", "data"),
+            State("rake-3d-graph", "figure"),
+            prevent_initial_call=True,
         )
         def handle_ac_conversion(n_clicks, selected_rows, table_data, current_fig):
             """Convert selected rake links to AC and update visualization"""
             if not n_clicks or not selected_rows or not table_data:
                 raise PreventUpdate
-            
+
             # Get selected link names
             selected_links = [
-                table_data[idx]["linkname"] 
-                for idx in selected_rows 
+                table_data[idx]["linkname"]
+                for idx in selected_rows
                 if idx < len(table_data)
             ]
-            
+
             # Perform conversion
             result = self.convertRakeLinksToAC(selected_links)
-            
+
             # Update table data (mark converted links as AC)
             updated_table = table_data.copy()
             for row in updated_table:
                 if row["linkname"] in result["links"]:
                     row["is_ac"] = "AC"
-            
+
             # Regenerate visualization with updated data
             self._reset_render_flags()
             self._apply_filters(self.query)
             fig = self.visualizeLinks3D()
             fig = self._post_process_station_mode(fig, self.query)
-            
+
             # Re-apply highlighting if there were selections
             if self.query.selectedLinks:
                 self._highlight_clicked(fig, self.query.selectedLinks)
-            
+
             # Status message
             status_msg = html.Div(
                 [
                     # html.Span("✓ ", style={"color": "#10b981", "fontWeight": "600"}),
                     html.Span(f"Converted {result['converted']} rake link(s) to AC: "),
-                    html.Span(", ".join(result["links"]), style={"fontWeight": "500"})
+                    html.Span(", ".join(result["links"]), style={"fontWeight": "500"}),
                 ],
                 style={
                     "padding": "8px 12px",
                     # "backgroundColor": "#d1fae5",
                     "borderLeft": "3px solid #10b981",
                     "borderRadius": "4px",
-                    "marginBottom": "8px"
-                }
+                    "marginBottom": "8px",
+                },
             )
-            
+
             return fig, updated_table, status_msg
 
         @self.app.callback(
-            Output("rake-link-table-container", "style"),  
+            Output("rake-link-table-container", "style"),
             Output("service-table-container", "style"),
             Input("filter-tabs", "active_tab"),
-            Input("graph-ready", "data")
+            Input("graph-ready", "data"),
         )
         def toggle_table_display(active_tab, graph_ready):
             if not graph_ready:
                 return {"display": "none"}, {"display": "none"}
-            
+
             if active_tab == "tab-service":
                 # Hide rake table, show service table
                 return {"display": "none"}, {"padding": "10px 0px", "display": "block"}
             else:
                 # Show rake table, hide service table (default for rake-link and station modes)
-                return {"padding": "10px 0px", "display": "block"}, {"display": "none"}       
-        
+                return {"padding": "10px 0px", "display": "block"}, {"display": "none"}
+
         @self.app.callback(
-            Output('rake-3d-graph', 'figure', allow_duplicate=True),
-            Input('service-table', 'selected_rows'),
-            State('rake-3d-graph', 'figure'),
-            State('service-table', 'data'),
+            Output("rake-3d-graph", "figure", allow_duplicate=True),
+            Input("service-table", "selected_rows"),
+            State("rake-3d-graph", "figure"),
+            State("service-table", "data"),
             State("filter-tabs", "active_tab"),
-            prevent_initial_call=True
+            prevent_initial_call=True,
         )
-        def update_graph_from_service_selection(selected_rows, current_fig, table_data, active_tab):
-            if active_tab != "tab-service" or current_fig is None or not current_fig.get('data'):
+        def update_graph_from_service_selection(
+            selected_rows, current_fig, table_data, active_tab
+        ):
+            if (
+                active_tab != "tab-service"
+                or current_fig is None
+                or not current_fig.get("data")
+            ):
                 raise PreventUpdate
-            
+
             # Extract selected service IDs
             if not selected_rows or not table_data:
                 selected_services = []
             else:
                 selected_services = [
-                    table_data[idx]["service_id"] 
-                    for idx in selected_rows 
+                    table_data[idx]["service_id"]
+                    for idx in selected_rows
                     if idx < len(table_data)
                 ]
-            
+
             # Update query state
             self.query.selectedServices = selected_services
-            
+
             # Apply highlighting
             fig = go.Figure(current_fig)
             self._highlight_clicked_services(fig, selected_services)
-            
+
             return fig
 
         @self.app.callback(
@@ -946,132 +1080,139 @@ class Simulator:
             State("filter-tabs", "active_tab"),
             prevent_initial_call=True,
         )
-        def toggle_service_from_graph(clickData, table_rows, current_selection, active_tab):
+        def toggle_service_from_graph(
+            clickData, table_rows, current_selection, active_tab
+        ):
             if active_tab != "tab-service" or not clickData or not table_rows:
                 return current_selection or []
-            
+
             try:
                 # Extract service ID from hover text
                 # Format is "LinkName-ServiceID: Station @ Time"
                 hover_text = clickData["points"][0].get("hovertext", "")
-                
+
                 # Parse "A-93001: VIRAR @ 02:45" → "93001"
-                parts = hover_text.split(':')[0].strip()  # "A-93001"
-                if '-' in parts:
-                    clicked_service = parts.split('-')[1]  # "93001"
+                parts = hover_text.split(":")[0].strip()  # "A-93001"
+                if "-" in parts:
+                    clicked_service = parts.split("-")[1]  # "93001"
                 else:
                     return current_selection or []
-                
+
             except (KeyError, IndexError) as e:
                 print(f"Error extracting clicked service: {e}")
                 return current_selection or []
-            
+
             # Find row index for this service
             clicked_idx = None
             for idx, row in enumerate(table_rows):
                 if clicked_service in row.get("service_id", ""):
                     clicked_idx = idx
                     break
-            
+
             if clicked_idx is None:
                 return current_selection or []
-            
+
             # Toggle selection
             selected = list(current_selection or [])
             if clicked_idx in selected:
                 selected.remove(clicked_idx)
             else:
                 selected.append(clicked_idx)
-            
+
             return selected
-            
+
         @self.app.callback(
-            Output('rake-3d-graph', 'figure', allow_duplicate=True),
-            Input('rake-link-table', 'selected_rows'),
-            State('rake-3d-graph', 'figure'),
-            State('rake-link-table', 'data'),
-            prevent_initial_call=True
+            Output("rake-3d-graph", "figure", allow_duplicate=True),
+            Input("rake-link-table", "selected_rows"),
+            State("rake-3d-graph", "figure"),
+            State("rake-link-table", "data"),
+            prevent_initial_call=True,
         )
         def update_graph_highlighting(selected_rows, current_fig, table_data):
             """Update graph highlighting when selection changes without regenerating the entire plot"""
-            if current_fig is None or not current_fig.get('data'):
+            if current_fig is None or not current_fig.get("data"):
                 raise PreventUpdate
-            
+
             # Extract selected link names
             if not selected_rows or not table_data:
                 selected_links = []
             else:
                 selected_links = [
-                    table_data[idx]["linkname"] 
-                    for idx in selected_rows 
+                    table_data[idx]["linkname"]
+                    for idx in selected_rows
                     if idx < len(table_data)
                 ]
-            
+
             # Update the query state
             self.query.selectedLinks = selected_links
-            
+
             # Apply highlighting to the existing figure
             fig = go.Figure(current_fig)
             self._highlight_clicked(fig, selected_links)
-            
-            return fig 
+
+            return fig
 
         @self.app.callback(
             Output("service-table", "data"),
             Output("service-count", "children"),
-            Input('generate-button', 'n_clicks'),
-            Input('ac-selector', 'value'),
+            Input("generate-button", "n_clicks"),
+            Input("ac-selector", "value"),
             State("filter-tabs", "active_tab"),
-            prevent_initial_call=True
+            prevent_initial_call=True,
         )
         def build_service_table(n_clicks, ac_select, active_tab):
             is_service_mode = (
-                active_tab == "tab-service" or 
-                self.query.type == FilterType.SERVICE
+                active_tab == "tab-service" or self.query.type == FilterType.SERVICE
             )
 
             if n_clicks == 0 or self.parser is None or not is_service_mode:
                 return [], ""
-            
+
             rows = []
             for svc in self.parser.wtt.suburbanServices:
                 if not svc.render or not svc.events:
                     continue
-                
+
                 # Get service details
-                svc_id_str = ','.join(str(sid) for sid in svc.serviceId)
+                svc_id_str = ",".join(str(sid) for sid in svc.serviceId)
                 start_time = fmt_time(svc.events[0].atTime) if svc.events else "--:--"
-                
+
                 # Find which rake link this service belongs to
                 rake_link = "?"
                 for rc in self.parser.wtt.rakecycles:
                     if svc in rc.servicePath:
                         rake_link = rc.linkName
                         break
-                
-                rows.append({
-                    "id": svc_id_str,  # Used for selection tracking
-                    "service_id": svc_id_str,
-                    "direction": svc.direction.name if svc.direction else "?",
-                    "is_ac": "AC" if svc.needsACRake else "Non-AC",
-                    "cars": svc.rakeSizeReq if svc.rakeSizeReq else "?",
-                    "start_station": svc.initStation.name if svc.initStation else "?",
-                    "end_station": svc.finalStation.name if svc.finalStation else "?",
-                    "start_time": start_time,
-                    "rake_link": rake_link,
-                })
-            
+
+                rows.append(
+                    {
+                        "id": svc_id_str,  # Used for selection tracking
+                        "service_id": svc_id_str,
+                        "direction": svc.direction.name if svc.direction else "?",
+                        "is_ac": "AC" if svc.needsACRake else "Non-AC",
+                        "cars": svc.rakeSizeReq if svc.rakeSizeReq else "?",
+                        "start_station": (
+                            svc.initStation.name if svc.initStation else "?"
+                        ),
+                        "end_station": (
+                            svc.finalStation.name if svc.finalStation else "?"
+                        ),
+                        "start_time": start_time,
+                        "rake_link": rake_link,
+                    }
+                )
+
             return rows, f"{len(rows)} services"
-        
+
         @self.app.callback(
             Output("rake-link-table", "data"),
             Output("rl-table-store", "data"),
             Output("rake-link-count", "children"),
-            Input('generate-button', 'n_clicks'),
-            Input('ac-selector', 'value'),
-            State('upload-wtt-inline', 'contents'),
-            State('upload-summary-inline', 'contents'),
-            prevent_initial_call=True
+            Input("generate-button", "n_clicks"),
+            Input("ac-selector", "value"),
+            State("upload-wtt-inline", "contents"),
+            State("upload-summary-inline", "contents"),
+            prevent_initial_call=True,
         )
         def build_rake_table(n_clicks, ac_select, wttContents, summaryContents):
             time.sleep(2)
@@ -1083,33 +1224,35 @@ class Simulator:
                 if not rc.render or rc.rake is None:
                     continue
 
-                rows.append({
-                    "id": rc.linkName,
-                    "linkname": rc.linkName,
-                    "cars": rc.rake.rakeSize,
-                    "is_ac": "AC" if rc.rake.isAC else "Non-AC",
-                    "length_km": int(rc.lengthKm),
-                    "start": rc.servicePath[0].initStation.name,
-                    "end": rc.servicePath[-1].finalStation.name,
-                    "n_services": len(rc.servicePath),
-                })
+                rows.append(
+                    {
+                        "id": rc.linkName,
+                        "linkname": rc.linkName,
+                        "cars": rc.rake.rakeSize,
+                        "is_ac": "AC" if rc.rake.isAC else "Non-AC",
+                        "length_km": int(rc.lengthKm),
+                        "start": rc.servicePath[0].initStation.name,
+                        "end": rc.servicePath[-1].finalStation.name,
+                        "n_services": len(rc.servicePath),
+                    }
+                )
 
             return rows, rows, f"{len(rows)} rake links"
 
         @self.app.callback(
             Output("right-panel-content", "children", allow_duplicate=True),
-            Input('rake-link-table', 'selected_rows'),
+            Input("rake-link-table", "selected_rows"),
             State("mode-details", "active"),
-            prevent_initial_call=True
+            prevent_initial_call=True,
         )
         def update_query_info_on_selection(selected_rows, details_active):
             """Update Query Info panel content when selection changes, but only if already viewing it"""
             if not details_active:
                 # Don't update if we're not viewing Query Info
                 raise PreventUpdate
-            
+
             # We're viewing Query Info, so update it
-            return self.build_query_info_panel()
+            return self._ui.build_query_info_panel()
 
         @self.app.callback(
             Output("rake-link-table", "selected_rows"),
@@ -1122,7 +1265,7 @@ class Simulator:
             """Add/remove clicked trace from selection"""
             if not clickData or not table_rows:
                 return current_selection or []
-            
+
             # Get clicked link name from the trace
             try:
                 # The trace name is stored in the 'name' property of the clicked point's trace
@@ -1130,30 +1273,30 @@ class Simulator:
                 # We need to get the actual trace name from the figure, but we can't access it here
                 # Instead, use hovertext which contains the link name
                 hover_text = clickData["points"][0].get("hovertext", "")
-                
+
                 # Format is "LinkName: Station @ Time" or "LinkName-ServiceID: Station @ Time"
-                clicked_link = hover_text.split(':')[0].strip()
-                
+                clicked_link = hover_text.split(":")[0].strip()
+
                 # Handle service-level traces (format: "A-93001" -> "A")
-                clicked_link = clicked_link.split('-')[0]
-                
+                clicked_link = clicked_link.split("-")[0]
+
                 print(f"Clicked link from graph: {clicked_link}")
-                
+
             except (KeyError, IndexError) as e:
                 print(f"Error extracting clicked link: {e}")
                 return current_selection or []
-            
+
             # Find row index for this link
             clicked_idx = None
             for idx, row in enumerate(table_rows):
                 if row.get("linkname") == clicked_link:
                     clicked_idx = idx
                     break
-            
+
             if clicked_idx is None:
                 print(f"Link {clicked_link} not found in table")
                 return current_selection or []
-            
+
             # Toggle: add if not present, remove if present
             selected = list(current_selection or [])
             if clicked_idx in selected:
@@ -1162,29 +1305,28 @@ class Simulator:
             else:
                 selected.append(clicked_idx)
                 print(f"Added {clicked_link} to selection")
-            
+
             return selected
-        
 
         @self.app.callback(
-            Output('app-state', 'data', allow_duplicate=True),  # Reuse existing store
-            Input('rake-link-table', 'selected_rows'),
-            State('rake-link-table', 'data'),
-            prevent_initial_call=True
+            Output("app-state", "data", allow_duplicate=True),  # Reuse existing store
+            Input("rake-link-table", "selected_rows"),
+            State("rake-link-table", "data"),
+            prevent_initial_call=True,
         )
         def update_selected_rakes(selected_rows, table_data):
             """Update self.query.selectedLinks when table selection changes"""
             if not selected_rows or not table_data:
                 self.query.selectedLinks = []
                 return {"selectedLinks": []}
-            
+
             # Extract link names from selected rows
             selected_links = [
-                table_data[idx]["linkname"] 
-                for idx in selected_rows 
+                table_data[idx]["linkname"]
+                for idx in selected_rows
                 if idx < len(table_data)
             ]
-            
+
             self.query.selectedLinks = selected_links
             return {"selectedLinks": selected_links}
 
@@ -1199,29 +1341,36 @@ class Simulator:
         )
         def switch_right_panel(viz_clicks, details_clicks):
             ctx = dash.callback_context.triggered_id
-            
+
             # Only switch when buttons are clicked, NOT when selection changes
             if ctx == "mode-details":
-                return {"display": "none"}, self.build_query_info_panel(), False, True
+                return (
+                    {"display": "none"},
+                    self.build_query_info_panel(),
+                    False,
+                    True,
+                )
 
             # Default: show visualization
             return {"display": "block"}, html.Div(), True, False
-           
+
         @self.app.callback(
-            Output('status-div', 'children'),
-            Output('rake-3d-graph', 'figure'),
-            Output('export-button', 'disabled'),
+            Output("status-div", "children"),
+            Output("rake-3d-graph", "figure"),
+            Output("export-button", "disabled"),
             Output("graph-ready", "data"),
-            Output("rake-link-table", "selected_rows", allow_duplicate=True),  
-            Output("service-table", "selected_rows", allow_duplicate=True),    
-            Input('generate-button', 'n_clicks'),
-            Input('rake-3d-graph', 'clickData'),
-            Input('ac-selector', 'value'),
-            State('upload-wtt-inline', 'contents'),
-            State('upload-summary-inline', 'contents'),
-            prevent_initial_call=True
+            Output("rake-link-table", "selected_rows", allow_duplicate=True),
+            Output("service-table", "selected_rows", allow_duplicate=True),
+            Input("generate-button", "n_clicks"),
+            Input("rake-3d-graph", "clickData"),
+            Input("ac-selector", "value"),
+            State("upload-wtt-inline", "contents"),
+            State("upload-summary-inline", "contents"),
+            prevent_initial_call=True,
         )
-        def onGenerateClick(n_clicks, clickData, ac_status, wttContents, summaryContents):
+        def onGenerateClick(
+            n_clicks, clickData, ac_status, wttContents, summaryContents
+        ):
 
             if n_clicks == 0 or wttContents is None or summaryContents is None:
                 return "", go.Figure(), True, False, [], []
@@ -1237,7 +1386,7 @@ class Simulator:
                 # First-time backend build
                 if not self.linkTimingsCreated:
                     self.parser.wtt.generateRakeCycles()
-                    self.parser.wtt.storeOriginalACStates() 
+                    self.parser.wtt.storeOriginalACStates()
                     self.linkTimingsCreated = True
                 else:
                     self.parser.wtt.resetACStates()
@@ -1287,41 +1436,40 @@ class Simulator:
 
                 #     # Annotation
                 #     rc = next(r for r in self.parser.wtt.rakecycles if r.linkName == clicked)
-                    # fig.update_layout(annotations=self._build_annotation(rc))
+                # fig.update_layout(annotations=self._build_annotation(rc))
 
-                    # return html.Div(), fig, False, True
+                # return html.Div(), fig, False, True
 
                 # Default final return
                 return html.Div(), fig, False, True, [], []
 
             except Exception as e:
                 import traceback
+
                 traceback.print_exc()
                 return (html.Div(f"Error: {e}"), go.Figure(), True, False, [], [])
 
-    
         @self.app.callback(
-                Output('download-report', 'data'),
-                Input('export-button', 'n_clicks'),
-                prevent_initial_call=True
+            Output("download-report", "data"),
+            Input("export-button", "n_clicks"),
+            prevent_initial_call=True,
         )
         def trigger_download(n_clicks):
             filter_type = self.query.type.value if self.query.type else "unknown"
-            
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
+
             filename = f"wtt_report_{filter_type}_{timestamp}.txt"
             filename_xlsx = f"WTT_Export_{filter_type}_{timestamp}.xlsx"
 
             # Use dcc.send_data_frame to export to Excel
             report_xlsx = self.exportXlsx()
             return dcc.send_data_frame(report_xlsx.to_excel, filename_xlsx, index=False)
-            
-            # report_content = self.exportResults() 
-            
+
+            # report_content = self.exportResults()
+
             # return dict(content=report_content, filename=filename)
-        
-        
+
     def detectGaps(self, size, stations, inTime):
         print(f"# Gaps > {size} minutes:")
         t_lower, t_upper = inTime
@@ -1343,11 +1491,10 @@ class Simulator:
 
             gapCount = 0
             for i in range(1, len(times)):
-                if (times[i] - times[i-1]) > size:
+                if (times[i] - times[i - 1]) > size:
                     gapCount += 1
 
             print(f"{stn}: {gapCount}")
-
 
     def applyStationFilters(self, qq):
         t_lower, t_upper = qq.inTimePeriod
@@ -1364,37 +1511,35 @@ class Simulator:
 
             for ev in svc.events:
                 ev.render = True
-                
+
                 # FIX: Check if atTime exists
                 if ev.atTime is None:
                     ev.render = False
                     continue
-                    
+
                 t = ev.atTime
                 if not (t_lower <= t <= t_upper):
                     ev.render = False
-            
+
             svc.checkACConstraint(qq)
 
-        
-
     def applyServiceFilters(self, qq):
-        '''
+        """
         Filters individual services based on the Service tab query constraints.
         Sets the 'render' flag on each Service object.
         Also updates the parent RakeCycle 'render' flag.
-        '''
+        """
         for svc in self.parser.wtt.suburbanServices:
             svc.render = True
 
-            if not svc.events: # invalid
+            if not svc.events:  # invalid
                 svc.render = False
                 continue
             # Also reset event render flags
             for ev in svc.events:
                 ev.render = True
 
-            # check if the service satisfies the 
+            # check if the service satisfies the
             # start and end station constraint
             svc.checkDirectionConstraint(qq)
             svc.checkACConstraint(qq)
@@ -1403,31 +1548,33 @@ class Simulator:
             svc.checkPassingThroughConstraint(qq)
             print(f"constraint checks done for {svc}")
         # print("all services constraint checks done")
-        
+
         for rc in self.parser.wtt.rakecycles:
             rc.render = False
             if rc.servicePath:
                 if any(svc.render for svc in rc.servicePath):
                     rc.render = True
-        
-        visible_services = len([s for s in self.parser.wtt.suburbanServices if s.render])
+
+        visible_services = len(
+            [s for s in self.parser.wtt.suburbanServices if s.render]
+        )
         visible_cycles = len([r for r in self.parser.wtt.rakecycles if r.render])
         # print(f"Visible services after filter: {visible_services}")
         # print(f"Visible rake cycles after filter: {visible_cycles}")
 
     def exportXlsx(self):
         """
-        Generates a Pandas DataFrame containing the filtered services with 
+        Generates a Pandas DataFrame containing the filtered services with
         columns for Direction, Line, Service ID, Stations, and Timings.
         """
         rows = []
-        
+
         # Collect services based on the current filter/render state
         # Usually, self.parser.wtt.suburbanServices contains all services
         for svc in self.parser.wtt.suburbanServices:
-            if not getattr(svc, 'render', True):
+            if not getattr(svc, "render", True):
                 continue
-                
+
             # Formatting Departure and Arrival
             # Departure is the first event, Arrival is the last event
             dep_time = "--:--"
@@ -1440,121 +1587,128 @@ class Simulator:
             # Typically Line.THROUGH is Fast and Line.LOCAL is Slow
             line_str = "Fast" if svc.line == tt.Line.THROUGH else "Slow"
 
-            rows.append({
-                "Service ID": ", ".join(str(sid) for sid in svc.serviceId),
-                "Start Time": dep_time,
-                "Source": svc.initStation.name,
-                "Destination": svc.finalStation.name,
-                "Direction": svc.direction.name,   # UP or DOWN
-                "Line": line_str,                  # Fast or Slow
-            })
+            rows.append(
+                {
+                    "Service ID": ", ".join(str(sid) for sid in svc.serviceId),
+                    "Start Time": dep_time,
+                    "Source": svc.initStation.name,
+                    "Destination": svc.finalStation.name,
+                    "Direction": svc.direction.name,  # UP or DOWN
+                    "Line": line_str,  # Fast or Slow
+                }
+            )
 
         return pd.DataFrame(rows)
-            
+
     def exportResults(self):
-            buffer = io.StringIO() # Use StringIO to capture print output
+        buffer = io.StringIO()  # Use StringIO to capture print output
 
-            # print the query
-            buffer.write(f"Filter Query: {self.query}\n\n")
-            
-            # list rakecycle inconsistencies
-            buffer.write("=== Rake Link Inconsistencies ===\n")
-            if self.parser.wtt.conflictingLinks:
-                for el in self.parser.wtt.conflictingLinks:
-                    buffer.write(f"Link {el[0].linkName}")
-                    buffer.write(f"  Summary: {el[0].serviceIds}\n")
-                    buffer.write(f"  WTT:     {el[1]}\n---\n")
+        # print the query
+        buffer.write(f"Filter Query: {self.query}\n\n")
+
+        # list rakecycle inconsistencies
+        buffer.write("=== Rake Link Inconsistencies ===\n")
+        if self.parser.wtt.conflictingLinks:
+            for el in self.parser.wtt.conflictingLinks:
+                buffer.write(f"Link {el[0].linkName}")
+                buffer.write(f"  Summary: {el[0].serviceIds}\n")
+                buffer.write(f"  WTT:     {el[1]}\n---\n")
+        else:
+            buffer.write("  No inconsistencies found.\n")
+
+        if self.query.type == FilterType.RAKELINK:
+            # List rakecycles plotted
+            buffer.write("\n=== Rake Links Plotted (RakeLink Filter) ===\n")
+            plotted_rcs = [rc for rc in self.parser.wtt.rakecycles if rc.render]
+            if plotted_rcs:
+                for rc in plotted_rcs:
+                    buffer.write(f"{rc}\n")
+                    buffer.write(f"Services: {rc.serviceIds}\n")
             else:
-                buffer.write("  No inconsistencies found.\n")
+                buffer.write("  No rake links matched the filter criteria.\n")
 
+        if self.query.type == FilterType.SERVICE:
+            # List rake links with their rendered services
+            buffer.write(
+                "\n=== Rake Links with Rendered Services (Service Filter) ===\n"
+            )
+            any_rendered = False
+            for rc in self.parser.wtt.rakecycles:
+                if not rc.render:
+                    continue
 
-            if self.query.type == FilterType.RAKELINK:
-                # List rakecycles plotted
-                buffer.write("\n=== Rake Links Plotted (RakeLink Filter) ===\n")
-                plotted_rcs = [rc for rc in self.parser.wtt.rakecycles if rc.render]
-                if plotted_rcs:
-                    for rc in plotted_rcs:
-                        buffer.write(f"{rc}\n")
-                        buffer.write(f"Services: {rc.serviceIds}\n")
+                # Get rendered services in this rake cycle
+                rendered_services = [svc for svc in rc.servicePath if svc.render]
+
+                if rendered_services:
+                    any_rendered = True
+                    buffer.write(f"\n{rc}\n")
+                    buffer.write(
+                        f"  Rendered Services ({len(rendered_services)}/{len(rc.servicePath)}):\n"
+                    )
+                    for svc in rendered_services:
+                        buffer.write(f"    {svc}\n")
+
+            if not any_rendered:
+                buffer.write("  No services matched the filter criteria.\n")
+
+            # === Passing Through Times (sorted) ===
+            if self.query.passingThrough:
+                buffer.write(
+                    "\n=== Passing Through Times (Grouped by Station, Sorted by Time) ===\n"
+                )
+
+                pt_stations = [s.upper() for s in self.query.passingThrough]
+
+                # Filter services passing all constraints
+                rendered_services = [
+                    svc
+                    for svc in self.parser.wtt.suburbanServices
+                    if getattr(svc, "render", False)
+                ]
+
+                if not rendered_services:
+                    buffer.write("  No services matched the filter criteria.\n\n")
                 else:
-                    buffer.write("  No rake links matched the filter criteria.\n")
+                    # Build: station list of (serviceId, time_minutes, time_str)
+                    st_table = {st: [] for st in pt_stations}
 
-            
-            if self.query.type == FilterType.SERVICE:
-                # List rake links with their rendered services
-                buffer.write("\n=== Rake Links with Rendered Services (Service Filter) ===\n")
-                any_rendered = False
-                for rc in self.parser.wtt.rakecycles:
-                    if not rc.render:
-                        continue
-                        
-                    # Get rendered services in this rake cycle
-                    rendered_services = [svc for svc in rc.servicePath if svc.render]
-                    
-                    if rendered_services:
-                        any_rendered = True
-                        buffer.write(f"\n{rc}\n")
-                        buffer.write(f"  Rendered Services ({len(rendered_services)}/{len(rc.servicePath)}):\n")
-                        for svc in rendered_services:
-                            buffer.write(f"    {svc}\n")
-                
-                if not any_rendered:
-                    buffer.write("  No services matched the filter criteria.\n")
-            
-                # === Passing Through Times (sorted) ===
-                if self.query.passingThrough:
-                    buffer.write("\n=== Passing Through Times (Grouped by Station, Sorted by Time) ===\n")
+                    for svc in rendered_services:
+                        sid = svc.serviceId[0]
 
-                    pt_stations = [s.upper() for s in self.query.passingThrough]
+                        # Map events for this service
+                        st_times = {}
+                        for ev in svc.events:
+                            if not getattr(ev, "render", True):
+                                continue
+                            st = ev.atStation.upper()
+                            st_times.setdefault(st, []).append(ev.atTime)
 
-                    # Filter services passing all constraints
-                    rendered_services = [
-                        svc for svc in self.parser.wtt.suburbanServices
-                        if getattr(svc, "render", False)
-                    ]
-
-                    if not rendered_services:
-                        buffer.write("  No services matched the filter criteria.\n\n")
-                    else:
-                        # Build: station list of (serviceId, time_minutes, time_str)
-                        st_table = {st: [] for st in pt_stations}
-
-                        for svc in rendered_services:
-                            sid = svc.serviceId[0]
-
-                            # Map events for this service
-                            st_times = {}
-                            for ev in svc.events:
-                                if not getattr(ev, "render", True):
-                                    continue
-                                st = ev.atStation.upper()
-                                st_times.setdefault(st, []).append(ev.atTime)
-
-                            # Fill table
-                            for st in pt_stations:
-                                if st in st_times:
-                                    t = st_times[st][-1]   # last occurrence as you defined
-                                    hh = int(t // 60)
-                                    mm = int(t % 60)
-                                    time_str = f"{hh:02d}:{mm:02d}"
-                                    st_table[st].append((sid, t, time_str))
-                                else:
-                                    # No pass — push with None time so it sorts last
-                                    st_table[st].append((sid, None, "---"))
-
-                        # Sort each station’s list by time (None goes last)
+                        # Fill table
                         for st in pt_stations:
-                            st_table[st].sort(key=lambda x: (x[1] is None, x[1]))
+                            if st in st_times:
+                                t = st_times[st][-1]  # last occurrence as you defined
+                                hh = int(t // 60)
+                                mm = int(t % 60)
+                                time_str = f"{hh:02d}:{mm:02d}"
+                                st_table[st].append((sid, t, time_str))
+                            else:
+                                # No pass — push with None time so it sorts last
+                                st_table[st].append((sid, None, "---"))
 
-                        # Print nicely
-                        for st in pt_stations:
-                            buffer.write(f"\n=== {st} ===\n")
-                            for sid, t, time_str in st_table[st]:
-                                buffer.write(f"   {sid:<8} {time_str}\n")
+                    # Sort each station’s list by time (None goes last)
+                    for st in pt_stations:
+                        st_table[st].sort(key=lambda x: (x[1] is None, x[1]))
 
-                        buffer.write("\n")
+                    # Print nicely
+                    for st in pt_stations:
+                        buffer.write(f"\n=== {st} ===\n")
+                        for sid, t, time_str in st_table[st]:
+                            buffer.write(f"   {sid:<8} {time_str}\n")
 
-            return buffer.getvalue() # Return the string content
+                    buffer.write("\n")
+
+        return buffer.getvalue()  # Return the string content
 
     def generateSummaryStatus(self):
         wtt = self.parser.wtt
@@ -1563,19 +1717,19 @@ class Simulator:
         rcs = [rc for rc in wtt.rakecycles if rc.render]
 
         # total services
-        total_services=0
-        ac_services=0
+        total_services = 0
+        ac_services = 0
         for rc in rcs:
             total_services += len(rc.servicePath)
             for svc in rc.servicePath:
                 if svc.needsACRake and svc.render:
-                    ac_services+=1
+                    ac_services += 1
                     # print(f"Needs AC: {svc.serviceId}")
                 # else:
                 #     print(f"Non AC: {svc.serviceId}")
 
-        total_parsed_services = len(wtt.suburbanServices) 
-        non_ac_services = total_services - ac_services 
+        total_parsed_services = len(wtt.suburbanServices)
+        non_ac_services = total_services - ac_services
 
         # rake links
         total_parsed_links = len(wtt.rakecycles)
@@ -1583,7 +1737,7 @@ class Simulator:
 
         total_rendered_links = len(rcs)
         valid_rcs = [rc for rc in rcs if rc.lengthKm > 0]
-        shortest_rcs = sorted(valid_rcs, key=lambda rc:rc.lengthKm)[:3]
+        shortest_rcs = sorted(valid_rcs, key=lambda rc: rc.lengthKm)[:3]
         longest_rcs = sorted(valid_rcs, key=lambda rc: rc.lengthKm, reverse=True)[:3]
 
         # contents
@@ -1605,23 +1759,37 @@ class Simulator:
             f"Rendered Links: {total_rendered_links}",
         ]
 
-        rake_footer = html.Div([
-            html.Small("Shortest: " + ", ".join(f"{rc.linkName} ({rc.lengthKm:.1f} km)" for rc in shortest_rcs)),
-            html.Br(),
-            html.Small("Longest: " + ", ".join(f"{rc.linkName} ({rc.lengthKm:.1f} km)" for rc in longest_rcs)),
-        ])
+        rake_footer = html.Div(
+            [
+                html.Small(
+                    "Shortest: "
+                    + ", ".join(
+                        f"{rc.linkName} ({rc.lengthKm:.1f} km)" for rc in shortest_rcs
+                    )
+                ),
+                html.Br(),
+                html.Small(
+                    "Longest: "
+                    + ", ".join(
+                        f"{rc.linkName} ({rc.lengthKm:.1f} km)" for rc in longest_rcs
+                    )
+                ),
+            ]
+        )
 
         service_card = self.make_summary_card("Service Summary", service_items)
-        rake_card = self.make_summary_card("Rake Link Summary", rake_items, footer=rake_footer)
+        rake_card = self.make_summary_card(
+            "Rake Link Summary", rake_items, footer=rake_footer
+        )
 
-        #htnl 
+        # htnl
         summary_layout = dbc.Row(
             [
                 dbc.Col(service_card, width=6, style={"padding": "4px"}),
-                dbc.Col(rake_card, width=6, style={"padding": "4px"})
+                dbc.Col(rake_card, width=6, style={"padding": "4px"}),
             ],
             className="g-1",  # minimal gap between cols
-            style={"margin": "0"}
+            style={"margin": "0"},
         )
 
         # Outer wrapper
@@ -1631,11 +1799,10 @@ class Simulator:
                 "margin": "0px 0px 0px 0px",
                 "padding": "0px 4px",
                 "borderRadius": "6px",
-                "backgroundColor": "#f9fafb"
-            }
+                "backgroundColor": "#f9fafb",
+            },
         )
 
-            
     def applyTerminalStationFilters(self, start, end):
         print(f"Applying filters: start={start}, end={end}")
 
@@ -1655,14 +1822,14 @@ class Simulator:
                 rc.render = rc.render and False
             # else:
             #     print(f"Match! {rc.linkName}")
-    
+
     def applyPassingThroughFilter(self, qq):
-        '''Make rakecycles visible that have events at every station in passingThru within the specified timeperiod'''
+        """Make rakecycles visible that have events at every station in passingThru within the specified timeperiod"""
         selected = qq.passingThrough
         print(qq.passingThrough)
         if not selected:
             return
-        
+
         selected = [s.upper() for s in selected]
         t_start, t_end = qq.inTimePeriod if qq.inTimePeriod else (None, None)
 
@@ -1705,7 +1872,7 @@ class Simulator:
                 rc.render = False
 
     def applyACFilter(self, qq):
-        '''Render only AC / Non-AC / All rake cycles as per filter.'''
+        """Render only AC / Non-AC / All rake cycles as per filter."""
         mode = qq.ac
         if mode is None or mode == "all":
             return  # no filtering
@@ -1722,7 +1889,7 @@ class Simulator:
                 rc.render = False
 
     def applyLinkFilters(self, qq):
-        '''Filter rake cycles based on selected start and end stations.'''
+        """Filter rake cycles based on selected start and end stations."""
 
         self.applyTerminalStationFilters(qq.startStation, qq.endStation)
         self.applyPassingThroughFilter(qq)
@@ -1745,12 +1912,12 @@ class Simulator:
         z_offset = 0
 
         # Check if we're filtering by service (granular) or rake link (coarse)
-        is_service_filter = (self.query.type == FilterType.SERVICE)
+        is_service_filter = self.query.type == FilterType.SERVICE
 
         for rc in rakecycles:
             # --- SERVICE FILTER MODE: Only render filtered services ---
             if is_service_filter:
-            # Don't check rc.render here - we only care about individual services
+                # Don't check rc.render here - we only care about individual services
                 for svc in rc.servicePath:
                     # Skip services that don't pass the filter
                     if not svc.render:
@@ -1760,7 +1927,7 @@ class Simulator:
                     # Separate lists for in-range vs out-of-range events
                     x_in, y_in, z_in, labels_in = [], [], [], []
                     x_out, y_out, z_out, labels_out = [], [], [], []
-                    
+
                     for ev in svc.events:
                         # if not ev.atTime or not ev.atStation:
                         #     continue
@@ -1773,7 +1940,7 @@ class Simulator:
 
                         # # Check if event is within the filtered time range
                         # ev_render = getattr(ev, 'render', True)
-                        
+
                         # if ev_render:
                         # Event is in the time filter range
                         x_in.append(minutes)
@@ -1788,15 +1955,25 @@ class Simulator:
                         #     labels_out.append(stName)
 
                     # Format service IDs for display (handle list of IDs)
-                    svc_id_str = ','.join(str(sid) for sid in svc.serviceId) if svc.serviceId else '?'
-                    
+                    svc_id_str = (
+                        ",".join(str(sid) for sid in svc.serviceId)
+                        if svc.serviceId
+                        else "?"
+                    )
+
                     # Create trace for OUT-OF-RANGE events (dimmed, background context)
                     if x_out:
-                        color_dim = "rgba(66,133,244,0.6)" if svc.needsACRake else "rgba(90,90,90,0.6)"
-                        
+                        color_dim = (
+                            "rgba(66,133,244,0.6)"
+                            if svc.needsACRake
+                            else "rgba(90,90,90,0.6)"
+                        )
+
                         all_traces.append(
                             go.Scatter3d(
-                                x=x_out, y=y_out, z=z_out,
+                                x=x_out,
+                                y=y_out,
+                                z=z_out,
                                 mode="lines+markers",
                                 line=dict(color=color_dim),
                                 marker=dict(size=2, color=color_dim),
@@ -1810,18 +1987,26 @@ class Simulator:
                                 visible=True,
                             )
                         )
-                    
+
                     # Create trace for IN-RANGE events (prominent, filtered results)
                     # color = "rgba(66,133,244,0.8)" if svc.needsACRake else "rgba(90,90,90,0.8)"
                     if x_in:
-                        color_bright = "rgba(66,133,244,0.8)" if svc.needsACRake else "rgba(90,90,90,0.8)"
-                        
+                        color_bright = (
+                            "rgba(66,133,244,0.8)"
+                            if svc.needsACRake
+                            else "rgba(90,90,90,0.8)"
+                        )
+
                         all_traces.append(
                             go.Scatter3d(
-                                x=x_in, y=y_in, z=z_in,
+                                x=x_in,
+                                y=y_in,
+                                z=z_in,
                                 mode="lines+markers",
                                 line=dict(color=color_bright),
-                                marker=dict(size=2, color=color_bright),  # Larger markers
+                                marker=dict(
+                                    size=2, color=color_bright
+                                ),  # Larger markers
                                 hovertext=[
                                     f"{svc_id_str}: {st} @ {(int(xx)//60) % 24:02d}:{int(xx%60):02d}"
                                     for xx, st in zip(x_in, labels_in)
@@ -1832,7 +2017,7 @@ class Simulator:
                             )
                         )
                         z_labels.append((z_offset, f"{rc.linkName}-{svc_id_str}"))
-                    
+
                     # Only increment z if we rendered something
                     if x_in or x_out:
                         z_offset += 40  # increment z for next service
@@ -1845,9 +2030,9 @@ class Simulator:
 
                 if self.query.type == FilterType.STATION:
                     mode = "markers"
-                elif self.query.type ==FilterType.RAKELINK:
+                elif self.query.type == FilterType.RAKELINK:
                     mode = "lines+markers"
-                
+
                 # Aggregate all services in the rake cycle into a single trace
                 x, y, z, stationLabels = [], [], [], []
 
@@ -1861,7 +2046,7 @@ class Simulator:
 
                         if not ev.render:
                             continue
-                            
+
                         minutes = ev.atTime
                         # print(minutes)
 
@@ -1873,14 +2058,18 @@ class Simulator:
                         y.append(stationToY[stName])
                         z.append(z_offset)
                         stationLabels.append(stName)
-                
+
                 # Create single trace for entire rake cycle
                 if x:
-                    color = "rgba(66,133,244,0.8)" if rc.rake.isAC else "rgba(90,90,90,0.8)"
-                    
+                    color = (
+                        "rgba(66,133,244,0.8)" if rc.rake.isAC else "rgba(90,90,90,0.8)"
+                    )
+
                     all_traces.append(
                         go.Scatter3d(
-                            x=x, y=y, z=z,
+                            x=x,
+                            y=y,
+                            z=z,
                             mode=mode,
                             line=dict(color=color),
                             marker=dict(size=2, color=color),
@@ -1889,7 +2078,6 @@ class Simulator:
                                 f"{rc.linkName}: {st} @ {(int(xx)//60) % 24:02d}:{int(xx%60):02d}"
                                 for xx, st in zip(x, stationLabels)
                             ],
-
                             hoverinfo="text",
                             name=rc.linkName,
                             visible=True,
@@ -1897,13 +2085,15 @@ class Simulator:
                     )
                     z_labels.append((z_offset, rc.linkName))
                     z_offset += 40  # increment z for next rakecycle
-        
-        if self.query.inTimePeriod and (self.query.type == FilterType.SERVICE or 
-                                        self.query.type == FilterType.STATION):
+
+        if self.query.inTimePeriod and (
+            self.query.type == FilterType.SERVICE
+            or self.query.type == FilterType.STATION
+        ):
             x_start, x_end = self.query.inTimePeriod
-            x_end += 90 # padding
+            x_end += 90  # padding
         else:
-            x_start, x_end  = 165, 1605
+            x_start, x_end = 165, 1605
         # padding = 120  # 120 minutes
         # x_end = (x_end + padding)
         # x_start = max(0, x_start - padding)
@@ -1934,7 +2124,7 @@ class Simulator:
                     tickvals=yTickVals,
                     ticktext=yTickText,
                     range=[min(yTickVals), max(yTickVals)],
-                    autorange=False
+                    autorange=False,
                 ),
                 zaxis=dict(
                     showgrid=True,
@@ -1946,22 +2136,23 @@ class Simulator:
                 camera=dict(
                     eye=dict(x=0, y=0, z=2.5),
                     up=dict(x=0, y=1, z=0),
-                    center=dict(x=0, y=0, z=0)
+                    center=dict(x=0, y=0, z=0),
                 ),
                 aspectmode="manual",
-                aspectratio=dict(x=2.8, y=1.2, z=1.2)
+                aspectratio=dict(x=2.8, y=1.2, z=1.2),
             ),
             scene_camera_projection_type="orthographic",
             width=1300,
             height=700,
             margin=dict(t=0, l=5, b=5, r=5),
-            autosize=True
+            autosize=True,
         )
 
         return fig
 
     def run(self):
         self.app.run(debug=True, port=8051)
+
 
 if __name__ == "__main__":
     sim = Simulator()
